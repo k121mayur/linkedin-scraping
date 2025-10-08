@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    image: linkedin-scraper:latest
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      FLASK_ENV: production
+    volumes:
+      - ./playwright_auth.json:/app/playwright_auth.json
+    shm_size: "1gb"
