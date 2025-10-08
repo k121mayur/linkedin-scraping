@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright/python:v1.45.0-focal
+FROM mcr.microsoft.com/playwright/python:v1.48.0-focal
 
 # Create and switch to the application directory.
 WORKDIR /app

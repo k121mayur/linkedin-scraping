@@ -216,6 +216,50 @@ def scrape_jobs(
                 emit_progress(progress_callback, f"Job {i + 1}: job detail pane did not appear.")
                 continue
 
+            def first_attr_from(selectors: List[str], attrs: List[str]) -> str:
+                for selector in selectors:
+                    for source in (detail_div, page):
+                        target = source.locator(selector)
+                        if target.count() == 0:
+                            continue
+                        for attr in attrs:
+                            try:
+                                value = target.first.get_attribute(attr)
+                            except Exception:
+                                value = None
+                            if value:
+                                normalized = normalize_link(value)
+                                if normalized:
+                                    return normalized
+                                return value.strip()
+                        try:
+                            dataset_value = target.first.evaluate(
+                                """(el) => {
+                                    if (!el || !el.dataset) return "";
+                                    const data = el.dataset;
+                                    return (
+                                        data.url ||
+                                        data.applyUrl ||
+                                        data.applyLink ||
+                                        data.jobUrl ||
+                                        data.jobApplyUrl ||
+                                        data.href ||
+                                        data.link ||
+                                        ""
+                                    );
+                                }"""
+                            )
+                        except Exception:
+                            dataset_value = None
+                        if dataset_value:
+                            normalized = normalize_link(dataset_value)
+                            if normalized:
+                                return normalized
+                            dataset_value = str(dataset_value).strip()
+                            if dataset_value:
+                                return dataset_value
+                return ""
+
             title = extract_first_text(
                 detail_div,
                 [
@@ -246,7 +290,36 @@ def scrape_jobs(
                 ],
             )
 
-            jobs_data.append({"title": title, "company": company, "description": desc})
+            company_link = first_attr_from(
+                [
+                    "a.jobs-unified-top-card__company-name[href]",
+                    "a.topcard__org-name-link[href]",
+                    "a.top-card-layout__second-subline-item[href]",
+                ],
+                ["href"],
+            )
+            apply_link = first_attr_from(
+                [
+                    "a[data-control-name='jobdetails_topcard_inapply']",
+                    "a[data-tracking-control-name='public_jobs_apply-link-offsite']",
+                    "a.jobs-apply-button--top-card",
+                    "a.jobs-apply-button",
+                    "a.top-card-layout__cta",
+                    "div.jobs-apply-button--top-card a",
+                    "button.jobs-apply-button",
+                ],
+                ["href", "data-url", "data-job-url", "data-apply-url"],
+            )
+
+            jobs_data.append(
+                {
+                    "title": title,
+                    "company": company,
+                    "company_link": company_link or "N/A",
+                    "apply_link": apply_link or "N/A",
+                    "description": desc,
+                }
+            )
             emit_progress(progress_callback, f"[{i + 1}/{count}] Collected: {title} at {company}")
 
         except Exception as exc:
@@ -278,6 +351,19 @@ def slugify(value: str) -> str:
     cleaned = "".join(ch if ch.isalnum() else "_" for ch in value.lower())
     parts = [segment for segment in cleaned.split("_") if segment]
     return "_".join(parts) or "results"
+
+
+def normalize_link(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    link = value.strip()
+    if not link:
+        return ""
+    if link.startswith("//"):
+        link = f"https:{link}"
+    elif link.startswith("/"):
+        link = f"https://www.linkedin.com{link}"
+    return link
 
 
 def build_download_name(keyword: str, location: str) -> str:
