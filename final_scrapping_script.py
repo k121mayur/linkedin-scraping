@@ -1,10 +1,15 @@
 import io
+import json
 import time
+import uuid
 from pathlib import Path
-from typing import Dict, List, Tuple
+from queue import SimpleQueue
+from threading import Lock, Thread
+from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote
+from flask import Flask
 
-from flask import Flask, render_template, request, send_file
+from flask import Response, jsonify, render_template, request, send_file, stream_with_context
 from playwright.sync_api import TimeoutError, sync_playwright
 
 from config import (
@@ -25,6 +30,11 @@ except ImportError:
 
 app = Flask(__name__, template_folder="templates")
 
+ProgressCallback = Optional[Callable[[str], None]]
+
+jobs_store: Dict[str, Dict[str, object]] = {}
+jobs_lock = Lock()
+
 
 def ensure_credentials() -> Tuple[str, str]:
     email = LINKEDIN_EMAIL.strip()
@@ -36,18 +46,31 @@ def ensure_credentials() -> Tuple[str, str]:
     return email, password
 
 
-def create_authenticated_context(browser, auth_path: Path, email: str, password: str):
+def emit_progress(callback: ProgressCallback, message: str) -> None:
+    print(message)
+    if callback:
+        callback(message)
+
+
+def create_authenticated_context(
+    browser,
+    auth_path: Path,
+    email: str,
+    password: str,
+    progress_callback: ProgressCallback = None,
+):
     auth_path = Path(auth_path)
     if auth_path.exists():
-        print("Using saved authentication...")
+        emit_progress(progress_callback, "Using saved authentication...")
         context = browser.new_context(storage_state=str(auth_path))
         page = context.new_page()
         page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
         try:
             page.wait_for_selector("div.feed-identity-module", timeout=15000)
+            emit_progress(progress_callback, "LinkedIn session restored.")
             return context, page
         except TimeoutError:
-            print("Stored authentication looks invalid. Re-authenticating...")
+            emit_progress(progress_callback, "Stored authentication looks invalid. Re-authenticating...")
             page.close()
             context.close()
 
@@ -69,18 +92,24 @@ def create_authenticated_context(browser, auth_path: Path, email: str, password:
 
     auth_path.parent.mkdir(parents=True, exist_ok=True)
     context.storage_state(path=str(auth_path))
+    emit_progress(progress_callback, "LinkedIn login successful.")
     return context, page
 
 
-def scrape_jobs(page, keyword: str, location: str) -> List[Dict[str, str]]:
+def scrape_jobs(
+    page,
+    keyword: str,
+    location: str,
+    progress_callback: ProgressCallback = None,
+) -> List[Dict[str, str]]:
     search_url = (
         f"https://www.linkedin.com/jobs/search/?keywords={quote(keyword)}&location={quote(location)}"
     )
-    print(f"Navigating to {search_url}")
+    emit_progress(progress_callback, f"Navigating to {search_url}")
     try:
         page.goto(search_url, timeout=90000, wait_until="domcontentloaded")
     except TimeoutError as exc:
-        print(f"Navigation warning: {exc}. Continuing with current page state.")
+        emit_progress(progress_callback, f"Navigation warning: {exc}. Continuing with current page state.")
     try:
         page.wait_for_load_state("networkidle", timeout=15000)
     except TimeoutError:
@@ -117,7 +146,7 @@ def scrape_jobs(page, keyword: str, location: str) -> List[Dict[str, str]]:
     try:
         page.wait_for_selector(job_item_selector, timeout=30000)
     except TimeoutError:
-        print("Job list not found.")
+        emit_progress(progress_callback, "Job list not found.")
         return []
 
     # Scroll to load more job cards
@@ -128,7 +157,7 @@ def scrape_jobs(page, keyword: str, location: str) -> List[Dict[str, str]]:
     jobs_data: List[Dict[str, str]] = []
     job_items = page.locator(job_item_selector)
     count = job_items.count()
-    print(f"Found {count} job listings.")
+    emit_progress(progress_callback, f"Found {count} job listings.")
 
     def extract_first_text(container, selectors) -> str:
         for selector in selectors:
@@ -170,7 +199,7 @@ def scrape_jobs(page, keyword: str, location: str) -> List[Dict[str, str]]:
                 try:
                     link.click(force=True, timeout=800)
                 except Exception as e:
-                    print(f"Click retry failed for job {i + 1}: {e}")
+                    emit_progress(progress_callback, f"Click retry failed for job {i + 1}: {e}")
                     continue
 
             detail_div = None
@@ -184,7 +213,7 @@ def scrape_jobs(page, keyword: str, location: str) -> List[Dict[str, str]]:
                     continue
 
             if detail_div is None:
-                print(f"Job {i + 1}: job detail pane did not appear.")
+                emit_progress(progress_callback, f"Job {i + 1}: job detail pane did not appear.")
                 continue
 
             title = extract_first_text(
@@ -218,10 +247,10 @@ def scrape_jobs(page, keyword: str, location: str) -> List[Dict[str, str]]:
             )
 
             jobs_data.append({"title": title, "company": company, "description": desc})
-            print(f"[{i + 1}/{count}] Collected: {title} at {company}")
+            emit_progress(progress_callback, f"[{i + 1}/{count}] Collected: {title} at {company}")
 
         except Exception as exc:
-            print(f"Error processing job {i + 1}: {exc}")
+            emit_progress(progress_callback, f"Error processing job {i + 1}: {exc}")
             continue
 
     return jobs_data
@@ -256,14 +285,16 @@ def build_download_name(keyword: str, location: str) -> str:
     return f"linkedin_jobs_{slugify(keyword)}_{slugify(location)}_{timestamp}.xlsx"
 
 
-def run_scraper(keyword: str, location: str):
+def run_scraper(keyword: str, location: str, progress_callback: ProgressCallback = None):
     email, password = ensure_credentials()
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=HEADLESS)
-        context, page = create_authenticated_context(browser, AUTH_FILE_PATH, email, password)
+        context, page = create_authenticated_context(
+            browser, AUTH_FILE_PATH, email, password, progress_callback
+        )
         try:
-            data = scrape_jobs(page, keyword, location)
+            data = scrape_jobs(page, keyword, location, progress_callback)
         finally:
             context.close()
             browser.close()
@@ -297,11 +328,122 @@ def index():
                 )
             except RuntimeError as exc:
                 error = str(exc)
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-except
                 print(f"Unexpected error: {exc}")
                 error = "An unexpected error occurred while scraping. Check the logs for details."
 
     return render_template("index.html", keyword=keyword, location=location, error=error)
+
+
+def _scrape_job_worker(job_id: str, keyword: str, location: str) -> None:
+    with jobs_lock:
+        job_entry = jobs_store.get(job_id)
+    if not job_entry:
+        return
+
+    queue: SimpleQueue = job_entry["queue"]  # type: ignore[assignment]
+
+    def progress(message: str) -> None:
+        queue.put({"type": "log", "message": message})
+
+    try:
+        progress("Starting LinkedIn login...")
+        excel_stream, filename = run_scraper(keyword, location, progress_callback=progress)
+        file_bytes = excel_stream.getvalue()
+        with jobs_lock:
+            job_entry["status"] = "completed"
+            job_entry["result"] = file_bytes
+            job_entry["filename"] = filename
+        queue.put({"type": "done"})
+    except Exception as exc:  # pylint: disable=broad-except
+        with jobs_lock:
+            job_entry["status"] = "error"
+            job_entry["error"] = str(exc)
+        queue.put({"type": "error", "message": str(exc)})
+    finally:
+        queue.put(None)
+        if job_entry.get("status") == "error":
+            with jobs_lock:
+                jobs_store.pop(job_id, None)
+
+
+@app.post("/scrape")
+def start_scrape():
+    payload = request.get_json(silent=True) or {}
+    keyword = str(payload.get("keyword", "")).strip()
+    location = str(payload.get("location", "")).strip()
+
+    if not keyword or not location:
+        return jsonify({"error": "Both job title and location are required."}), 400
+
+    job_id = uuid.uuid4().hex
+    queue: SimpleQueue = SimpleQueue()
+    job_entry: Dict[str, object] = {
+        "queue": queue,
+        "status": "pending",
+        "result": None,
+        "filename": None,
+        "error": None,
+    }
+
+    with jobs_lock:
+        jobs_store[job_id] = job_entry
+
+    Thread(target=_scrape_job_worker, args=(job_id, keyword, location), daemon=True).start()
+
+    return jsonify({"job_id": job_id})
+
+
+@app.get("/stream/<job_id>")
+def stream_progress(job_id: str):
+    with jobs_lock:
+        job_entry = jobs_store.get(job_id)
+    if not job_entry:
+        return jsonify({"error": "Unknown job id."}), 404
+
+    queue: SimpleQueue = job_entry["queue"]  # type: ignore[assignment]
+
+    def event_stream():
+        while True:
+            message = queue.get()
+            if message is None:
+                break
+            yield f"data: {json.dumps(message)}\n\n"
+        yield "event: end\ndata: {}\n\n"
+
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return Response(stream_with_context(event_stream()), headers=headers, mimetype="text/event-stream")
+
+
+@app.get("/download/<job_id>")
+def download_result(job_id: str):
+    with jobs_lock:
+        job_entry = jobs_store.get(job_id)
+    if not job_entry:
+        return jsonify({"error": "Unknown job id."}), 404
+
+    if job_entry.get("status") != "completed":
+        return jsonify({"error": "Job not completed."}), 409
+
+    file_bytes: Optional[bytes] = job_entry.get("result")  # type: ignore[assignment]
+    filename: Optional[str] = job_entry.get("filename")  # type: ignore[assignment]
+    if file_bytes is None or filename is None:
+        return jsonify({"error": "Result missing."}), 500
+
+    buffer = io.BytesIO(file_bytes)
+    buffer.seek(0)
+
+    response = send_file(
+        buffer,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    with jobs_lock:
+        jobs_store.pop(job_id, None)
+
+    return response
 
 
 if __name__ == "__main__":
