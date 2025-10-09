@@ -3,7 +3,7 @@
 # - Installs system packages, Python venv, and project dependencies.
 # - Installs and configures Cloudflare Tunnel (cloudflared) named "linkedin-scrapping".
 # - Registers systemd units for the Flask/Gunicorn app and for the Cloudflare tunnel.
-#
+# - 
 # The script is idempotent and may be re-run after updating configuration.
 
 set -euo pipefail
