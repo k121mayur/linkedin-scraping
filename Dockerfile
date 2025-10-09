@@ -20,5 +20,5 @@ ENV PORT=5000 \
 # Expose the Flask port (configurable via PORT env var).
 EXPOSE 5000
 
-# Start the Flask application.
-CMD ["python", "final_scrapping_script.py"]
+# Start the application with Gunicorn, honoring the PORT environment variable.
+CMD ["sh", "-c", "exec gunicorn -b 0.0.0.0:${PORT:-5000} --threads 4 --timeout 360 final_scrapping_script:app"]

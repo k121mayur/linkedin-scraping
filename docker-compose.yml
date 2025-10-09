@@ -8,6 +8,11 @@ services:
       - .env
     environment:
       FLASK_ENV: production
+      PORT: 5000
+    command:
+      - sh
+      - -c
+      - exec gunicorn -b 0.0.0.0:${PORT:-5000} --threads 4 --timeout 360 final_scrapping_script:app
     volumes:
       - ./playwright_auth.json:/app/playwright_auth.json
     shm_size: "1gb"

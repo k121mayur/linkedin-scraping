@@ -42,6 +42,11 @@ except ImportError:
 
 app = Flask(__name__, template_folder="templates")
 
+
+def create_app() -> Flask:
+    """Factory used by Gunicorn to obtain the Flask application."""
+    return app
+
 ProgressCallback = Optional[Callable[[str], None]]
 
 jobs_store: Dict[str, Dict[str, object]] = {}
@@ -945,4 +950,4 @@ def download_result(job_id: str):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=FLASK_PORT, debug=FLASK_DEBUG)
+    create_app().run(host="0.0.0.0", port=FLASK_PORT, debug=FLASK_DEBUG)
