@@ -115,6 +115,21 @@ _VERIFICATION_SUBMIT_SELECTORS: Tuple[str, ...] = (
 _EMAIL_CODE_PATTERN = re.compile(r"\b(\d{6})\b")
 
 
+def _normalize_text(value: str) -> str:
+    """Normalize whitespace and trim stray non-breaking spaces."""
+    if not value:
+        return ""
+    normalized = value.replace("\u00a0", " ").replace("\u202f", " ")
+    return normalized.strip()
+
+
+def _normalize_secret(value: str) -> str:
+    """Normalize secrets such as app passwords by removing spacing artifacts."""
+    normalized = _normalize_text(value)
+    # Gmail app passwords ignore spaces; drop all blanks to avoid encoding issues.
+    return normalized.replace(" ", "")
+
+
 def _is_logged_in(page: Page) -> bool:
     """Return True when the current LinkedIn page looks authenticated."""
     try:
@@ -213,7 +228,12 @@ def _fetch_latest_code_once(
     sender: Optional[str],
 ) -> Optional[str]:
     with imaplib.IMAP4_SSL(host, port) as client:
-        client.login(username, password)
+        try:
+            client.login(username, password)
+        except imaplib.IMAP4.error as exc:  # type: ignore[attr-defined]
+            raise RuntimeError("IMAP authentication failed. Check Gmail credentials/app password.") from exc
+        except UnicodeEncodeError as exc:
+            raise RuntimeError("IMAP password or username contains unsupported characters.") from exc
         status, _ = client.select(folder)
         if status != "OK":
             raise RuntimeError(f"Unable to open IMAP folder '{folder}'.")
@@ -255,17 +275,17 @@ def _fetch_latest_code_once(
 def _fetch_linkedin_verification_code(
     progress_callback: ProgressCallback,
 ) -> str:
-    username = (GMAIL_USERNAME or "").strip()
-    password = (GMAIL_APP_PASSWORD or "").strip()
+    username = _normalize_text(GMAIL_USERNAME or "")
+    password = _normalize_secret(GMAIL_APP_PASSWORD or "")
     if not username or not password:
         raise RuntimeError(
             "Cannot solve LinkedIn verification automatically: configure GMAIL_USERNAME and GMAIL_APP_PASSWORD."
         )
 
-    host = (GMAIL_IMAP_HOST or "imap.gmail.com").strip()
+    host = _normalize_text(GMAIL_IMAP_HOST or "imap.gmail.com")
     port = int(GMAIL_IMAP_PORT or 993)
-    folder = (GMAIL_IMAP_FOLDER or "INBOX").strip()
-    sender = (GMAIL_VERIFICATION_SENDER or "").strip() or None
+    folder = _normalize_text(GMAIL_IMAP_FOLDER or "INBOX")
+    sender = _normalize_text(GMAIL_VERIFICATION_SENDER or "") or None
     poll_interval = max(2.0, float(GMAIL_POLL_INTERVAL or 8.0))
     timeout = max(poll_interval + 5.0, float(GMAIL_POLL_TIMEOUT or 180.0))
 

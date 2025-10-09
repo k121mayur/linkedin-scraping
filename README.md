@@ -25,7 +25,7 @@ FLASK_DEBUG=false
 PORT=5000
 
 GMAIL_USERNAME=shgplusplus@gmail.com
-GMAIL_APP_PASSWORD=app-password-generated-via-google
+GMAIL_APP_PASSWORD=app-password-generated-via-google  # remove spaces/non-breaking spaces when pasting
 GMAIL_IMAP_HOST=imap.gmail.com
 GMAIL_IMAP_PORT=993
 GMAIL_IMAP_FOLDER=INBOX
