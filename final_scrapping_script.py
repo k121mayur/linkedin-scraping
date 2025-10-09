@@ -6,7 +6,7 @@ from pathlib import Path
 from queue import SimpleQueue
 from threading import Lock, Thread
 from typing import Callable, Dict, List, Optional, Tuple
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlparse
 from flask import Flask
 
 from flask import Response, jsonify, render_template, request, send_file, stream_with_context
@@ -245,6 +245,13 @@ def scrape_jobs(
                                         data.jobApplyUrl ||
                                         data.href ||
                                         data.link ||
+                                        data.companyUrl ||
+                                        data.companyLink ||
+                                        data.orgUrl ||
+                                        data.orgLink ||
+                                        data.topcardUrl ||
+                                        data.buttonUrl ||
+                                        data.jobId ||
                                         ""
                                     );
                                 }"""
@@ -259,6 +266,38 @@ def scrape_jobs(
                             if dataset_value:
                                 return dataset_value
                 return ""
+
+            job_url = ""
+            job_id_attr = ""
+            try:
+                job_id_attr = job.get_attribute("data-occludable-job-id") or ""
+            except Exception:
+                job_id_attr = ""
+
+            try:
+                link_href = link.get_attribute("href")
+            except Exception:
+                link_href = None
+            if link_href:
+                job_url = normalize_link(link_href)
+            if not job_url and job_id_attr:
+                job_url = normalize_link(f"/jobs/view/{job_id_attr}")
+            if not job_url:
+                try:
+                    current_url = page.url
+                except Exception:
+                    current_url = ""
+                if current_url:
+                    try:
+                        parsed = urlparse(current_url)
+                        query_params = parse_qs(parsed.query)
+                        current_job_ids = query_params.get("currentJobId")
+                        if current_job_ids:
+                            candidate = current_job_ids[0]
+                            if candidate:
+                                job_url = normalize_link(f"/jobs/view/{candidate}")
+                    except Exception:
+                        pass
 
             title = extract_first_text(
                 detail_div,
@@ -292,24 +331,57 @@ def scrape_jobs(
 
             company_link = first_attr_from(
                 [
+                    "div.job-details-jobs-unified-top-card__company-name a[href]",
+                    "a[data-test-app-aware-link][href*='/company/']",
                     "a.jobs-unified-top-card__company-name[href]",
                     "a.topcard__org-name-link[href]",
                     "a.top-card-layout__second-subline-item[href]",
+                    "a[href*='linkedin.com/company/']",
                 ],
-                ["href"],
+                ["href", "data-url", "data-company-url", "data-link"],
             )
+            if not company_link:
+                try:
+                    company_locator = job.locator("a[href*='/company/']")
+                    if company_locator.count() > 0:
+                        href = company_locator.first.get_attribute("href")
+                        if href:
+                            company_link = normalize_link(href)
+                except Exception:
+                    pass
+
             apply_link = first_attr_from(
                 [
                     "a[data-control-name='jobdetails_topcard_inapply']",
+                    "a[data-control-name='jobdetails_topcard_inapply_enhanced']",
                     "a[data-tracking-control-name='public_jobs_apply-link-offsite']",
+                    "a[data-tracking-control-name*='apply']",
                     "a.jobs-apply-button--top-card",
                     "a.jobs-apply-button",
                     "a.top-card-layout__cta",
                     "div.jobs-apply-button--top-card a",
                     "button.jobs-apply-button",
+                    "button[data-job-id]",
                 ],
-                ["href", "data-url", "data-job-url", "data-apply-url"],
+                [
+                    "href",
+                    "data-url",
+                    "data-job-url",
+                    "data-apply-url",
+                    "data-redirect-url",
+                    "data-external-url",
+                    "data-job-id",
+                ],
             )
+
+            if apply_link and apply_link.isdigit():
+                apply_link = normalize_link(f"/jobs/view/{apply_link}")
+
+            if not apply_link and job_id_attr:
+                apply_link = normalize_link(f"/jobs/view/{job_id_attr}")
+
+            if not apply_link and job_url:
+                apply_link = job_url
 
             jobs_data.append(
                 {
@@ -363,6 +435,10 @@ def normalize_link(value: Optional[str]) -> str:
         link = f"https:{link}"
     elif link.startswith("/"):
         link = f"https://www.linkedin.com{link}"
+    elif link.startswith("www."):
+        link = f"https://{link}"
+    elif link.startswith("linkedin.com"):
+        link = f"https://{link}"
     return link
 
 
