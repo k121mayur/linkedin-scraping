@@ -33,8 +33,74 @@ APT_PACKAGES=(
   libcups2 libxshmfence1 libasound2 libxtst6 libgtk-3-0
 )
 
+declare -A PACKAGE_ALIASES=(
+  [libglib2.0-0]="libglib2.0-0t64"
+  [libatk1.0-0]="libatk1.0-0t64"
+  [libatk-bridge2.0-0]="libatk-bridge2.0-0t64"
+  [libcups2]="libcups2t64"
+  [libgtk-3-0]="libgtk-3-0t64"
+  [libasound2]="libasound2t64"
+)
+
+RESOLVED_APT_PACKAGES=()
+
 log() {
   echo "[run.sh] $*"
+}
+
+package_available() {
+  local pkg="$1"
+  if dpkg -s "$pkg" >/dev/null 2>&1; then
+    return 0
+  fi
+  if apt-cache show "$pkg" >/dev/null 2>&1; then
+    return 0
+  fi
+  local candidate
+  candidate="$(apt-cache policy "$pkg" 2>/dev/null | awk '/Candidate:/ {print $2}' | head -n1)"
+  if [[ -n "$candidate" && "$candidate" != "(none)" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+resolve_package_name() {
+  local pkg="$1"
+  if package_available "$pkg"; then
+    printf '%s\n' "$pkg"
+    return 0
+  fi
+  local alt="${PACKAGE_ALIASES[$pkg]:-}"
+  if [[ -n "$alt" ]]; then
+    if package_available "$alt"; then
+      printf '%s\n' "$alt"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+resolve_package_list() {
+  RESOLVED_APT_PACKAGES=()
+  declare -A seen=()
+  for pkg in "${APT_PACKAGES[@]}"; do
+    local resolved_pkg
+    if resolved_pkg="$(resolve_package_name "$pkg")"; then
+      if [[ -z "${seen[$resolved_pkg]+x}" ]]; then
+        if [[ "$resolved_pkg" != "$pkg" ]]; then
+          log "Using fallback apt package '$resolved_pkg' for '$pkg'"
+        fi
+        RESOLVED_APT_PACKAGES+=("$resolved_pkg")
+        seen["$resolved_pkg"]=1
+      fi
+    else
+      echo "Warning: could not find apt package '$pkg' or any defined fallback." >&2
+    fi
+  done
+  if [[ "${#RESOLVED_APT_PACKAGES[@]}" -eq 0 ]]; then
+    echo "Error: no apt packages resolved for installation." >&2
+    exit 1
+  fi
 }
 
 require_root() {
@@ -75,7 +141,8 @@ detect_app_port() {
 install_packages() {
   log "Updating apt metadata and installing required system packages..."
   apt-get update -y
-  DEBIAN_FRONTEND=noninteractive apt-get install -y "${APT_PACKAGES[@]}"
+  resolve_package_list
+  DEBIAN_FRONTEND=noninteractive apt-get install -y "${RESOLVED_APT_PACKAGES[@]}"
 }
 
 ensure_python_venv() {
