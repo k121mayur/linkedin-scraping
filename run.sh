@@ -48,6 +48,43 @@ log() {
   echo "[run.sh] $*"
 }
 
+get_path_owner() {
+  local path="$1"
+  if [[ ! -e "$path" ]]; then
+    echo ""
+    return
+  fi
+  if command -v stat >/dev/null 2>&1; then
+    if stat -c '%U' "$path" >/dev/null 2>&1; then
+      stat -c '%U' "$path"
+      return
+    elif stat -f '%Su' "$path" >/dev/null 2>&1; then
+      stat -f '%Su' "$path"
+      return
+    fi
+  fi
+  echo ""
+}
+
+ensure_directory_owner() {
+  local path="$1"
+  if [[ -z "$path" ]]; then
+    return
+  fi
+  if [[ -e "$path" && ! -d "$path" ]]; then
+    echo "Error: $path exists but is not a directory." >&2
+    exit 1
+  fi
+  if [[ ! -d "$path" ]]; then
+    mkdir -p "$path"
+  fi
+  local owner
+  owner="$(get_path_owner "$path")"
+  if [[ "$owner" != "$APP_USER" ]]; then
+    chown -R "$APP_USER:$APP_GROUP" "$path"
+  fi
+}
+
 package_available() {
   local pkg="$1"
   if dpkg -s "$pkg" >/dev/null 2>&1; then
@@ -132,6 +169,10 @@ ensure_env_file() {
   fi
 }
 
+ensure_project_permissions() {
+  ensure_directory_owner "$PROJECT_DIR"
+}
+
 detect_app_port() {
   if [[ -n "$APP_PORT" ]]; then
     return
@@ -155,10 +196,13 @@ install_packages() {
 }
 
 ensure_python_venv() {
-  if [[ ! -d "$VENV_DIR" ]]; then
+  ensure_directory_owner "$PROJECT_DIR"
+  ensure_directory_owner "$(dirname "$VENV_DIR")"
+  if [[ ! -x "$VENV_DIR/bin/python" ]]; then
     log "Creating Python virtual environment at $VENV_DIR ..."
     sudo -u "$APP_USER" -H "$PYTHON_BIN" -m venv "$VENV_DIR"
   fi
+  ensure_directory_owner "$VENV_DIR"
 
   log "Installing Python dependencies inside the virtual environment..."
   sudo -u "$APP_USER" -H "$VENV_DIR/bin/pip" install --upgrade pip wheel
@@ -334,6 +378,7 @@ main() {
   require_root
   ensure_user_exists
   ensure_env_file
+  ensure_project_permissions
   detect_app_port
   install_packages
   ensure_python_venv
