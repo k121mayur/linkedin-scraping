@@ -66,17 +66,26 @@ package_available() {
 
 resolve_package_name() {
   local pkg="$1"
+  local alt="${PACKAGE_ALIASES[$pkg]:-}"
+
+  # Prefer architecture-aware alias when defined.
+  if [[ -n "$alt" ]] && package_available "$alt"; then
+    printf '%s\n' "$alt"
+    return 0
+  fi
+
   if package_available "$pkg"; then
     printf '%s\n' "$pkg"
     return 0
   fi
-  local alt="${PACKAGE_ALIASES[$pkg]:-}"
+
+  # If the alias exists but apt-cache cannot find it yet, surface the alias
+  # so apt-get tries it anyway (resolves virtual packages such as libasound2).
   if [[ -n "$alt" ]]; then
-    if package_available "$alt"; then
-      printf '%s\n' "$alt"
-      return 0
-    fi
+    printf '%s\n' "$alt"
+    return 0
   fi
+
   return 1
 }
 
