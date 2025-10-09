@@ -1,16 +1,20 @@
+import email
+import imaplib
 import io
 import json
+import re
 import time
 import uuid
 from pathlib import Path
 from queue import SimpleQueue
 from threading import Lock, Thread
-from typing import Callable, Dict, List, Optional, Tuple
+from email.message import Message
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlparse
 from flask import Flask
 
 from flask import Response, jsonify, render_template, request, send_file, stream_with_context
-from playwright.sync_api import TimeoutError, sync_playwright
+from playwright.sync_api import Page, TimeoutError, sync_playwright
 
 from config import (
     AUTH_FILE_PATH,
@@ -18,6 +22,14 @@ from config import (
     DEFAULT_LOCATION,
     FLASK_DEBUG,
     FLASK_PORT,
+    GMAIL_APP_PASSWORD,
+    GMAIL_IMAP_FOLDER,
+    GMAIL_IMAP_HOST,
+    GMAIL_IMAP_PORT,
+    GMAIL_POLL_INTERVAL,
+    GMAIL_POLL_TIMEOUT,
+    GMAIL_USERNAME,
+    GMAIL_VERIFICATION_SENDER,
     HEADLESS,
     LINKEDIN_EMAIL,
     LINKEDIN_PASSWORD,
@@ -52,6 +64,320 @@ def emit_progress(callback: ProgressCallback, message: str) -> None:
         callback(message)
 
 
+_SESSION_HEALTH_SELECTORS: Tuple[str, ...] = (
+    "div.feed-identity-module",
+    "header.global-nav",
+    "div.global-nav__me",
+    "button[aria-label='Start a post']",
+    "a[href*='/mynetwork/']",
+)
+
+
+_VERIFICATION_URL_TOKENS: Tuple[str, ...] = (
+    "checkpoint/challenge",
+    "checkpoint/verify",
+    "/mfa/",
+    "verification",
+    "pin",
+)
+
+_VERIFICATION_INPUT_SELECTORS: Tuple[str, ...] = (
+    "input#input__email_verification_pin",
+    "input[name='pin']",
+    "input[autocomplete='one-time-code']",
+    "input[data-id='pin-input']",
+    "input[data-test-id='pin-input']",
+    "input[maxlength='6']",
+    "input[type='text']",
+)
+
+_VERIFICATION_SPLIT_INPUT_PATTERNS: Tuple[str, ...] = (
+    "input[name^='input__email_verification_pin_']",
+    "input[name^='code-']",
+    "input[data-test-pin-index]",
+)
+
+_VERIFICATION_SUBMIT_SELECTORS: Tuple[str, ...] = (
+    "button[type='submit']",
+    "button[data-test-id='verify-button']",
+    "button[aria-label*='verify']",
+    "button[aria-label*='continue']",
+    "button:has-text('Submit')",
+    "button:has-text('Continue')",
+    "button:has-text('Verify')",
+)
+
+_EMAIL_CODE_PATTERN = re.compile(r"\b(\d{6})\b")
+
+
+def _is_logged_in(page: Page) -> bool:
+    """Return True when the current LinkedIn page looks authenticated."""
+    try:
+        current_url = page.url.lower()
+    except Exception:
+        return False
+
+    if any(token in current_url for token in ("login", "checkpoint", "uas/")):
+        return False
+
+    for selector in _SESSION_HEALTH_SELECTORS:
+        try:
+            locator = page.locator(selector)
+            if locator.count() > 0 and locator.first.is_visible():
+                return True
+        except Exception:
+            continue
+
+    return False
+
+
+def _is_verification_challenge(page: Page) -> bool:
+    """Detect whether the current page represents LinkedIn's verification gate."""
+    try:
+        current_url = page.url.lower()
+    except Exception:
+        current_url = ""
+
+    if any(token in current_url for token in _VERIFICATION_URL_TOKENS):
+        return True
+
+    candidate_selectors = _VERIFICATION_INPUT_SELECTORS + _VERIFICATION_SPLIT_INPUT_PATTERNS
+    for selector in candidate_selectors:
+        try:
+            locator = page.locator(selector)
+            if locator.count() > 0 and locator.first.is_enabled():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _normalize_html_to_text(raw: str) -> str:
+    """Collapse basic HTML content into plain text for code extraction."""
+    text = re.sub(r"<[^>]+>", " ", raw)
+    text = text.replace("&nbsp;", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _decode_message_part(part: Message) -> str:
+    payload = part.get_payload(decode=True)
+    if payload is None:
+        # Non-bytes payload; fall back to direct string conversion
+        raw = part.get_payload()
+        if isinstance(raw, str):
+            return raw
+        return ""
+
+    charset = part.get_content_charset() or "utf-8"
+    try:
+        decoded = payload.decode(charset, errors="ignore")
+    except Exception:
+        decoded = payload.decode("utf-8", errors="ignore")
+    return decoded
+
+
+def _extract_code_from_message(msg: Message) -> Optional[str]:
+    """Search LinkedIn emails for the verification code."""
+    parts: Iterable[Message]
+    if msg.is_multipart():
+        parts = msg.walk()
+    else:
+        parts = (msg,)
+
+    for part in parts:
+        if part.get_content_maintype() not in {"text", "multipart"}:
+            continue
+        if part.get_content_maintype() == "multipart":
+            continue
+
+        text = _decode_message_part(part)
+        if part.get_content_subtype() == "html":
+            text = _normalize_html_to_text(text)
+        match = _EMAIL_CODE_PATTERN.search(text)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _fetch_latest_code_once(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    folder: str,
+    sender: Optional[str],
+) -> Optional[str]:
+    with imaplib.IMAP4_SSL(host, port) as client:
+        client.login(username, password)
+        status, _ = client.select(folder)
+        if status != "OK":
+            raise RuntimeError(f"Unable to open IMAP folder '{folder}'.")
+
+        search_terms = ["UNSEEN"]
+        if sender:
+            search_terms.extend(["FROM", f'"{sender}"'])
+        status, data = client.search(None, *search_terms)
+        message_ids: List[bytes] = []
+        if status == "OK":
+            message_ids = [msg_id for msg_id in data[0].split() if msg_id]
+
+        if not message_ids:
+            fallback_terms = []
+            if sender:
+                fallback_terms = ["FROM", f'"{sender}"']
+            status, data = client.search(None, *(fallback_terms or ["ALL"]))
+            if status == "OK" and data:
+                fallback_ids = [msg_id for msg_id in data[0].split() if msg_id]
+                # Take the most recent handful of messages
+                message_ids = fallback_ids[-10:]
+
+        for msg_id in reversed(message_ids):
+            status, payload = client.fetch(msg_id, "(RFC822)")
+            if status != "OK" or not payload:
+                continue
+            for _part in payload:
+                if not isinstance(_part, tuple) or len(_part) < 2:
+                    continue
+                raw = _part[1]
+                msg = email.message_from_bytes(raw)
+                code = _extract_code_from_message(msg)
+                if code:
+                    client.store(msg_id, "+FLAGS", "(\\Seen)")
+                    return code
+    return None
+
+
+def _fetch_linkedin_verification_code(
+    progress_callback: ProgressCallback,
+) -> str:
+    username = (GMAIL_USERNAME or "").strip()
+    password = (GMAIL_APP_PASSWORD or "").strip()
+    if not username or not password:
+        raise RuntimeError(
+            "Cannot solve LinkedIn verification automatically: configure GMAIL_USERNAME and GMAIL_APP_PASSWORD."
+        )
+
+    host = (GMAIL_IMAP_HOST or "imap.gmail.com").strip()
+    port = int(GMAIL_IMAP_PORT or 993)
+    folder = (GMAIL_IMAP_FOLDER or "INBOX").strip()
+    sender = (GMAIL_VERIFICATION_SENDER or "").strip() or None
+    poll_interval = max(2.0, float(GMAIL_POLL_INTERVAL or 8.0))
+    timeout = max(poll_interval + 5.0, float(GMAIL_POLL_TIMEOUT or 180.0))
+
+    emit_progress(progress_callback, "Waiting for LinkedIn verification email...")
+    deadline = time.time() + timeout
+    last_error: Optional[Exception] = None
+    while time.time() < deadline:
+        try:
+            code = _fetch_latest_code_once(host, port, username, password, folder, sender)
+        except Exception as exc:  # pylint: disable=broad-except
+            last_error = exc
+            emit_progress(progress_callback, f"IMAP polling issue: {exc}")
+            code = None
+        if code:
+            emit_progress(progress_callback, "Received LinkedIn verification code from Gmail.")
+            return code
+        time.sleep(poll_interval)
+
+    if last_error:
+        raise RuntimeError(
+            f"LinkedIn verification email not found within {int(timeout)} seconds (last error: {last_error})."
+        ) from last_error
+    raise RuntimeError(f"LinkedIn verification email not found within {int(timeout)} seconds.")
+
+
+def _fill_verification_code(page: Page, code: str) -> bool:
+    """Type the verification code into whichever input layout LinkedIn uses."""
+    for selector in _VERIFICATION_INPUT_SELECTORS:
+        try:
+            locator = page.locator(selector)
+        except Exception:
+            continue
+        if locator.count() == 0:
+            continue
+        try:
+            locator.first.fill("")
+            locator.first.fill(code)
+            return True
+        except Exception:
+            continue
+
+    for selector in _VERIFICATION_SPLIT_INPUT_PATTERNS:
+        try:
+            locator = page.locator(selector)
+        except Exception:
+            continue
+        count = locator.count()
+        if count < len(code):
+            continue
+        success = True
+        for idx, digit in enumerate(code):
+            try:
+                locator.nth(idx).fill("")
+                locator.nth(idx).fill(digit)
+            except Exception:
+                success = False
+                break
+        if success:
+            return True
+    return False
+
+
+def _submit_verification(page: Page) -> bool:
+    for selector in _VERIFICATION_SUBMIT_SELECTORS:
+        try:
+            locator = page.locator(selector)
+        except Exception:
+            continue
+        if locator.count() == 0:
+            continue
+        try:
+            locator.first.click()
+            return True
+        except Exception:
+            continue
+    try:
+        page.keyboard.press("Enter")
+        return True
+    except Exception:
+        return False
+
+
+def _solve_verification_challenge(page: Page, progress_callback: ProgressCallback) -> None:
+    code = _fetch_linkedin_verification_code(progress_callback)
+    if not _fill_verification_code(page, code):
+        raise RuntimeError("Unable to locate verification input on LinkedIn checkpoint page.")
+    _submit_verification(page)
+    emit_progress(progress_callback, "Submitted verification code to LinkedIn.")
+
+
+def _await_authenticated_session(page: Page, progress_callback: ProgressCallback) -> None:
+    """Wait until LinkedIn marks the session as authenticated, solving verification if needed."""
+    # Give additional breathing room beyond the IMAP timeout.
+    safety_window = max(float(GMAIL_POLL_TIMEOUT or 180.0) + 60.0, 120.0)
+    deadline = time.time() + safety_window
+    while time.time() < deadline:
+        if _is_logged_in(page):
+            return
+        if _is_verification_challenge(page):
+            emit_progress(progress_callback, "LinkedIn requested verification; attempting automatic solve.")
+            _solve_verification_challenge(page, progress_callback)
+            try:
+                page.wait_for_load_state("networkidle", timeout=15000)
+            except TimeoutError:
+                pass
+            continue
+        try:
+            page.wait_for_url("**/feed/**", timeout=10000)
+        except TimeoutError:
+            pass
+        if _is_logged_in(page):
+            return
+        page.wait_for_timeout(1500)
+
+    raise RuntimeError("LinkedIn login did not finish before the verification timeout.")
+
+
 def create_authenticated_context(
     browser,
     auth_path: Path,
@@ -66,13 +392,18 @@ def create_authenticated_context(
         page = context.new_page()
         page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
         try:
-            page.wait_for_selector("div.feed-identity-module", timeout=15000)
-            emit_progress(progress_callback, "LinkedIn session restored.")
-            return context, page
+            page.wait_for_load_state("networkidle", timeout=15000)
         except TimeoutError:
+            pass
+        try:
+            _await_authenticated_session(page, progress_callback)
+        except RuntimeError:
             emit_progress(progress_callback, "Stored authentication looks invalid. Re-authenticating...")
             page.close()
             context.close()
+        else:
+            emit_progress(progress_callback, "LinkedIn session restored.")
+            return context, page
 
     context = browser.new_context()
     page = context.new_page()
@@ -82,12 +413,17 @@ def create_authenticated_context(
     page.click('button[type="submit"]')
 
     try:
-        page.wait_for_url("https://www.linkedin.com/feed/", timeout=60000)
-    except TimeoutError as exc:
+        page.wait_for_load_state("domcontentloaded", timeout=20000)
+    except TimeoutError:
+        pass
+
+    try:
+        _await_authenticated_session(page, progress_callback)
+    except RuntimeError as exc:
         page.close()
         context.close()
         raise RuntimeError(
-            "LinkedIn login did not complete. Check credentials or solve any verification challenge."
+            "LinkedIn login did not complete successfully, even after attempting verification."
         ) from exc
 
     auth_path.parent.mkdir(parents=True, exist_ok=True)

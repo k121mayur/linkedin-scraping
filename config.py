@@ -21,6 +21,16 @@ if PLAYWRIGHT_HEADLESS is None:
 else:
     HEADLESS = PLAYWRIGHT_HEADLESS.lower() not in {"false", "0", "no"}
 
+# --- Gmail / verification handling ---
+GMAIL_USERNAME = os.getenv("GMAIL_USERNAME")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+GMAIL_IMAP_HOST = os.getenv("GMAIL_IMAP_HOST", "imap.gmail.com")
+GMAIL_IMAP_PORT = int(os.getenv("GMAIL_IMAP_PORT", "993"))
+GMAIL_IMAP_FOLDER = os.getenv("GMAIL_IMAP_FOLDER", "INBOX")
+GMAIL_VERIFICATION_SENDER = os.getenv("GMAIL_VERIFICATION_SENDER", "security-noreply@linkedin.com")
+GMAIL_POLL_INTERVAL = float(os.getenv("GMAIL_POLL_INTERVAL", "8"))
+GMAIL_POLL_TIMEOUT = float(os.getenv("GMAIL_POLL_TIMEOUT", "180"))
+
 # --- Flask app settings ---
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 FLASK_PORT = int(os.getenv("PORT", "5000"))
