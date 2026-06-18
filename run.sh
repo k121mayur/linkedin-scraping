@@ -329,7 +329,7 @@ Group=${APP_GROUP}
 WorkingDirectory=${PROJECT_DIR}
 EnvironmentFile=-${ENV_FILE}
 Environment=PORT=${APP_PORT}
-ExecStart=${VENV_DIR}/bin/gunicorn -b 0.0.0.0:\${PORT} --threads 4 --timeout 360 final_scrapping_script:app
+ExecStart=${VENV_DIR}/bin/gunicorn -b 0.0.0.0:\${PORT} --threads 4 --timeout 360 app:app
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

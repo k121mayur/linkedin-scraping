@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual env
+venv/
+.venv/
+env/
+env.bak/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data (mounted as volume)
+data/
+
+# Secrets & auth
+.env
+playwright_auth.json
+*.xlsx
+*.db
+*.log
+
+# Archives
+_archive/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+
+# Hermes
+.hermes/
+
+# Docs (keep README for reference, skip plan files)
+PLAN.md
+TASKS.md
+AI_SCRAPER_PLAN.md

@@ -18,3 +18,8 @@ Thumbs.db
 /venv/
 /env/
 /env.bak/
+/data/
+/playwright_auth.json
+*.xlsx
+*.db
+__pycache__/

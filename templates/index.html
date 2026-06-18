@@ -1,534 +1,269 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>LinkedIn Job Scraper</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap"
-      rel="stylesheet">
-    <style>
-      :root {
-        color-scheme: light;
-        --bg-gradient: radial-gradient(circle at top left, #0f172a, #111827);
-        --card-gradient: linear-gradient(135deg, rgba(38, 70, 83, 0.35), rgba(8, 151, 157, 0.25));
-        --accent: #0ea5e9;
-        --accent-strong: #38bdf8;
-        --text-primary: #f9fafb;
-        --text-secondary: rgba(248, 250, 252, 0.7);
-        --error: #f87171;
-        font-size: 16px;
-      }
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LinkedIn Job Scraper — Prompt-Driven</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f172a;
+      --card-bg: linear-gradient(135deg, rgba(38,70,83,0.35), rgba(8,151,157,0.25));
+      --accent: #0ea5e9;
+      --accent-strong: #38bdf8;
+      --text: #f9fafb;
+      --text-muted: rgba(248,250,252,0.7);
+      --error: #f87171;
+      --success: #4ade80;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Poppins', sans-serif;
+      background: radial-gradient(circle at top left, #0f172a, #111827);
+      color: var(--text);
+      padding: 2rem 1rem;
+    }
+    .card {
+      width: min(680px, 100%);
+      border-radius: 24px;
+      padding: clamp(2rem, 4vw, 3rem);
+      backdrop-filter: blur(18px);
+      background: var(--card-bg);
+      border: 1px solid rgba(148,163,184,0.25);
+      box-shadow: 0 30px 70px -20px rgba(15,23,42,0.8);
+    }
+    h1 { font-size: 1.8rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .subtitle { color: var(--text-muted); margin-bottom: 2rem; }
+    form { display: grid; gap: 1.2rem; }
+    label { display: grid; gap: 0.5rem; font-size: 0.9rem; color: var(--text-muted); }
+    textarea {
+      width: 100%;
+      min-height: 100px;
+      border-radius: 14px;
+      padding: 1rem 1.2rem;
+      background: rgba(15,23,42,0.6);
+      border: 1px solid rgba(148,163,184,0.2);
+      color: var(--text);
+      font-size: 1rem;
+      font-family: inherit;
+      resize: vertical;
+      transition: border-color 160ms;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(14,165,233,0.15);
+    }
+    .row { display: flex; gap: 1rem; align-items: center; }
+    input[type="number"] {
+      width: 100px;
+      border-radius: 14px;
+      padding: 0.7rem 1rem;
+      background: rgba(15,23,42,0.6);
+      border: 1px solid rgba(148,163,184,0.2);
+      color: var(--text);
+      font-size: 1rem;
+    }
+    input[type="number"]:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    button {
+      justify-self: start;
+      border: none;
+      border-radius: 14px;
+      padding: 0.95rem 2.4rem;
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #0b1120;
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      box-shadow: 0 18px 30px -15px rgba(14,165,233,0.9);
+      cursor: pointer;
+      transition: transform 150ms, box-shadow 150ms;
+    }
+    button:hover { transform: translateY(-2px); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .error-box {
+      padding: 1rem 1.25rem;
+      border-radius: 12px;
+      background: rgba(248,113,113,0.12);
+      border: 1px solid rgba(248,113,113,0.35);
+      color: var(--error);
+      margin-bottom: 1rem;
+    }
+    [hidden] { display: none !important; }
+    .progress-section {
+      margin-top: 1.5rem;
+      padding: 1.5rem;
+      border-radius: 14px;
+      background: rgba(15,23,42,0.4);
+      border: 1px solid rgba(148,163,184,0.15);
+    }
+    .progress-bar {
+      height: 8px;
+      border-radius: 4px;
+      background: rgba(148,163,184,0.15);
+      margin: 0.8rem 0;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--success));
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+    .progress-info { font-size: 0.9rem; color: var(--text-muted); }
+    .download-links { display: flex; gap: 0.8rem; margin-top: 1rem; flex-wrap: wrap; }
+    .dl-btn {
+      padding: 0.6rem 1.4rem;
+      border-radius: 10px;
+      border: 1px solid var(--accent);
+      background: transparent;
+      color: var(--accent-strong);
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: background 150ms;
+    }
+    .dl-btn:hover { background: rgba(14,165,233,0.12); }
+    footer {
+      margin-top: 2rem;
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>Prompt-Driven LinkedIn Scraper</h1>
+  <p class="subtitle">Describe what you need in plain English — we'll find the right jobs.</p>
 
-      * {
-        box-sizing: border-box;
-      }
+  <div id="error" class="error-box" hidden></div>
 
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-family: 'Poppins', sans-serif;
-        background: var(--bg-gradient);
-        color: var(--text-primary);
-        padding: 2rem 1rem;
-      }
-
-      .card {
-        width: min(640px, 100%);
-        border-radius: 24px;
-        padding: clamp(2rem, 4vw, 3rem);
-        backdrop-filter: blur(18px);
-        background: var(--card-gradient);
-        border: 1px solid rgba(148, 163, 184, 0.25);
-        box-shadow: 0 30px 70px -20px rgba(15, 23, 42, 0.8);
-        position: relative;
-        overflow: hidden;
-      }
-
-      .card::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: radial-gradient(circle at top right, rgba(14, 165, 233, 0.25), transparent 55%);
-        pointer-events: none;
-      }
-
-      header {
-        display: flex;
-        gap: 1.5rem;
-        align-items: center;
-        margin-bottom: 2.5rem;
-        position: relative;
-        z-index: 1;
-      }
-
-      .logo-space {
-        width: 72px;
-        height: 72px;
-        border-radius: 20px;
-        border: 1px dashed rgba(148, 163, 184, 0.4);
-        display: grid;
-        place-items: center;
-        background: rgba(15, 23, 42, 0.4);
-        color: var(--text-secondary);
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.14rem;
-        padding: 0;
-        overflow: clip;
-      }
-
-      h1 {
-        font-size: clamp(1.75rem, 3vw, 2.4rem);
-        font-weight: 600;
-        margin: 0;
-      }
-
-      .subtitle {
-        margin: 0.5rem 0 0;
-        color: var(--text-secondary);
-        font-weight: 400;
-        max-width: 32ch;
-      }
-
-      .brand-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        background-color: rgba(14, 165, 233, 0.12);
-        color: var(--accent-strong);
-        padding: 0.4rem 0.9rem;
-        border-radius: 999px;
-        font-size: 1.5rem;
-        font-weight: 500;
-        letter-spacing: 0.04em;
-        margin-bottom: 1rem;
-      }
-
-      form {
-        display: grid;
-        gap: 1.5rem;
-        position: relative;
-        z-index: 1;
-      }
-
-      label {
-        display: grid;
-        gap: 0.7rem;
-        font-size: 0.95rem;
-        color: var(--text-secondary);
-        letter-spacing: 0.02em;
-      }
-
-      input[type="text"] {
-        width: 100%;
-        border: none;
-        border-radius: 14px;
-        padding: 1rem 1.2rem;
-        background: rgba(15, 23, 42, 0.6);
-        box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.2);
-        color: var(--text-primary);
-        font-size: 1rem;
-        transition: box-shadow 160ms ease, transform 160ms ease;
-      }
-
-      input[type="text"]:focus {
-        outline: none;
-        box-shadow: inset 0 0 0 2px rgba(14, 165, 233, 0.7), 0 0 0 4px rgba(14, 165, 233, 0.15);
-        transform: translateY(-2px);
-      }
-
-      button {
-        justify-self: start;
-        border: none;
-        border-radius: 14px;
-        padding: 0.95rem 2.4rem;
-        font-size: 1.05rem;
-        font-weight: 600;
-        letter-spacing: 0.03em;
-        color: #0b1120;
-        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
-        box-shadow: 0 18px 30px -15px rgba(14, 165, 233, 0.9);
-        cursor: pointer;
-        transition: transform 150ms ease, box-shadow 150ms ease;
-      }
-
-      button:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 22px 40px -15px rgba(14, 165, 233, 1);
-      }
-
-      button:active {
-        transform: translateY(-1px);
-      }
-
-      .error-box {
-        padding: 1rem 1.25rem;
-        border-radius: 12px;
-        background: rgba(248, 113, 113, 0.12);
-        border: 1px solid rgba(248, 113, 113, 0.35);
-        color: var(--error);
-        font-size: 0.95rem;
-      }
-      .error-box[hidden] {
-        display: none;
-      }
-
-      footer {
-        margin-top: 2.5rem;
-        text-align: center;
-        font-size: 0.85rem;
-        color: var(--text-secondary);
-        position: relative;
-        z-index: 1;
-      }
-
-      footer a {
-        color: var(--accent-strong);
-        text-decoration: none;
-        font-weight: 500;
-      }
-
-      footer a:hover {
-        text-decoration: underline;
-      }
-      image {
-        height: auto;
-        width: auto;
-        max-width: 100%;
-        max-height: 100%;
-      }
-      .loader-overlay {
-        position: absolute;
-        inset: 0;
-        background: #ffffff;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 1.4rem;
-        text-align: center;
-        padding: 2rem;
-        color: #0b1120;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 180ms ease;
-        z-index: 999;
-      }
-
-      .loader-overlay.active {
-        opacity: 1;
-        pointer-events: all;
-      }
-
-      .loader-content {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 1.1rem;
-        width: 100%;
-        max-width: 320px;
-      }
-
-      .loader-gif {
-        width: 160px;
-        max-width: 60vw;
-        border-radius: 18px;
-        box-shadow: 0 12px 30px -15px rgba(14, 165, 233, 0.8);
-      }
-
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-
-      .loader-message {
-        max-width: 34ch;
-        color: inherit;
-        font-size: 1.05rem;
-        line-height: 1.6;
-      }
-
-      .loader-log {
-        min-height: 2.5rem;
-        width: 100%;
-        border-radius: 14px;
-        background: rgba(14, 165, 233, 0.08);
-        border: 1px solid rgba(8, 151, 157, 0.2);
-        color: inherit;
-        font-size: 0.95rem;
-        padding: 0.8rem 1rem;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-        letter-spacing: 0.01em;
-      }
-
-      .loader-spinner {
-        width: 48px;
-        height: 48px;
-        border: 4px solid rgba(148, 163, 184, 0.25);
-        border-top-color: var(--accent-strong);
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <header>
-        <div class="logo-space">
-          <img src="/static/tpo_logo.jpg" alt="LinkedIn Logo" width="72"
-            height="72">
-        </div>
-        <div>
-          <span class="brand-pill">The People Order</span>
-          <h1>LinkedIn Job Scraper</h1>
-          <p class="subtitle">Curate rich job intelligence in seconds. Choose
-            your role and location and let the magic happen.</p>
-        </div>
-      </header>
-
-      {% if error %}
-      <div class="error-box">{{ error }}</div>
-      {% endif %}
-      <div id="client-error" class="error-box" hidden></div>
-
-      <form method="post" novalidate>
-        <label>
-          Job Title
-          <input
-            type="text"
-            name="keyword"
-            placeholder="e.g. Growth Product Manager"
-            value="{{ keyword }}"
-            required>
-        </label>
-        <label>
-          Location
-          <input
-            type="text"
-            name="location"
-            placeholder="e.g. Berlin, Germany"
-            value="{{ location }}"
-            required>
-        </label>
-        <button type="submit">Start Scraping</button>
-      </form>
-
-      <footer>
-        Powered by <a href="https://www.siliconmango.com" target="_blank"
-          rel="noopener">Silicon Mango</a>
-      </footer>
-      <div id="loader" class="loader-overlay" aria-hidden="true">
-        <div class="loader-content">
-          <img
-            src="/static/Loading Files.gif"
-            alt="Scraping animation"
-            class="loader-gif">
-          <p class="loader-message">We are scraping the jobs, please have a cup
-            of coffee till then.</p>
-          <div id="loader-log" class="loader-log" aria-live="polite"
-            aria-atomic="true"></div>
-          <div class="loader-spinner" role="presentation"></div>
-        </div>
-      </div>
+  <form id="scrape-form">
+    <label>
+      What jobs are you looking for?
+      <textarea id="prompt" name="prompt" placeholder="e.g. Extract the Jobs in NGO sector for accountant role or junior-level financial roles in India" required></textarea>
+    </label>
+    <div class="row">
+      <label>
+        Max jobs
+        <input type="number" id="max-jobs" name="max_jobs" value="100" min="5" max="500">
+      </label>
+      <button type="submit" id="submit-btn">Start Scraping</button>
     </div>
-    <script>
-      const form = document.querySelector("form");
-      const loader = document.getElementById("loader");
-      const loaderLog = document.getElementById("loader-log");
-      const loaderMessage = document.querySelector(".loader-message");
-      const submitButton = form?.querySelector('button[type="submit"]');
-      const clientErrorBox = document.getElementById("client-error");
-      const defaultLoaderText = loaderMessage?.textContent ?? "";
-      const defaultButtonText = submitButton?.textContent ?? "Start Scraping";
-      let activeSource = null;
+  </form>
 
-      const hideError = () => {
-        if (clientErrorBox) {
-          clientErrorBox.hidden = true;
-          clientErrorBox.textContent = "";
-        }
-      };
+  <div id="progress" class="progress-section" hidden>
+    <div class="progress-info" id="progress-text">Initializing...</div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+    </div>
+    <div class="progress-info" id="progress-detail"></div>
+    <div class="download-links" id="download-links" hidden>
+      <a class="dl-btn" id="dl-xlsx" href="#">Download XLSX</a>
+      <a class="dl-btn" id="dl-csv" href="#">Download CSV</a>
+      <a class="dl-btn" id="dl-json" href="#">Download JSON</a>
+    </div>
+  </div>
 
-      const showError = (message) => {
-        if (clientErrorBox) {
-          clientErrorBox.textContent = message;
-          clientErrorBox.hidden = false;
-        } else {
-          alert(message);
-        }
-      };
+  <footer>Powered by <a href="https://www.siliconmango.com" style="color:var(--accent-strong)">Silicon Mango</a></footer>
+</div>
 
-      const setLoaderState = (isActive) => {
-        if (!loader || !submitButton) {
+<script>
+const form = document.getElementById('scrape-form');
+const errorBox = document.getElementById('error');
+const progressSection = document.getElementById('progress');
+const progressText = document.getElementById('progress-text');
+const progressFill = document.getElementById('progress-fill');
+const progressDetail = document.getElementById('progress-detail');
+const downloadLinks = document.getElementById('download-links');
+const submitBtn = document.getElementById('submit-btn');
+const dlXlsx = document.getElementById('dl-xlsx');
+const dlCsv = document.getElementById('dl-csv');
+const dlJson = document.getElementById('dl-json');
+let eventSource = null;
+
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.hidden = false;
+}
+function hideError() {
+  errorBox.hidden = true;
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  hideError();
+  const prompt = document.getElementById('prompt').value.trim();
+  const maxJobs = parseInt(document.getElementById('max-jobs').value) || 100;
+  if (!prompt) { showError('Please enter a job description.'); return; }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Scraping...';
+  progressSection.hidden = false;
+  downloadLinks.hidden = true;
+  progressFill.style.width = '0%';
+  progressText.textContent = 'Parsing your request...';
+  progressDetail.textContent = '';
+
+  try {
+    const res = await fetch('/scrape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, max_jobs: maxJobs }),
+    });
+    const data = await res.json();
+    if (data.error) { showError(data.error); reset(); return; }
+
+    const runId = data.run_id;
+    dlXlsx.href = `/download/${runId}/xlsx`;
+    dlCsv.href = `/download/${runId}/csv`;
+    dlJson.href = `/download/${runId}/json`;
+
+    eventSource = new EventSource(`/stream/${runId}`);
+    eventSource.onmessage = (event) => {
+      try {
+        const p = JSON.parse(event.data);
+        if (p.error) { showError(p.error); reset(); return; }
+        if (p.status === 'done' || p.collected >= p.target) {
+          progressFill.style.width = '100%';
+          progressText.textContent = `Done! ${p.collected || '?'} jobs collected.`;
+          progressDetail.textContent = '';
+          downloadLinks.hidden = false;
+          eventSource.close();
+          reset(false);
           return;
         }
-        if (isActive) {
-          loader.classList.add("active");
-          loader.setAttribute("aria-hidden", "false");
-          submitButton.disabled = true;
-          submitButton.textContent = "Scraping...";
-          if (loaderMessage) {
-            loaderMessage.textContent = defaultLoaderText;
-          }
-        } else {
-          loader.classList.remove("active");
-          loader.setAttribute("aria-hidden", "true");
-          submitButton.disabled = false;
-          submitButton.textContent = defaultButtonText;
-          if (loaderLog) {
-            loaderLog.textContent = "";
-          }
-        }
-      };
+        const pct = p.target ? Math.round((p.collected / p.target) * 100) : 0;
+        progressFill.style.width = pct + '%';
+        progressText.textContent = `${p.collected || 0} / ${p.target || '?'} jobs found`;
+        progressDetail.textContent = p.current_query
+          ? `Searching: "${p.current_query}" in ${p.current_location || 'anywhere'}`
+          : '';
+      } catch (_) {}
+    };
+    eventSource.onerror = () => { showError('Connection lost. Check run status.'); reset(); };
+  } catch (err) {
+    showError('Failed to start scrape: ' + err.message);
+    reset();
+  }
+});
 
-      const resetUi = () => {
-        if (activeSource) {
-          activeSource.close();
-          activeSource = null;
-        }
-        setLoaderState(false);
-      };
-
-      const parseFilename = (disposition) => {
-        if (!disposition) {
-          return "linkedin_jobs.xlsx";
-        }
-        const utfMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-        if (utfMatch && utfMatch[1]) {
-          return decodeURIComponent(utfMatch[1]);
-        }
-        const asciiMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
-        if (asciiMatch && asciiMatch[1]) {
-          return asciiMatch[1];
-        }
-        return "linkedin_jobs.xlsx";
-      };
-
-      const downloadResult = async (jobId) => {
-        const response = await fetch(`/download/${jobId}`);
-        if (!response.ok) {
-          let errorMessage = "Failed to download the scraped results.";
-          try {
-            const body = await response.json();
-            if (body?.error) {
-              errorMessage = body.error;
-            }
-          } catch (err) {
-            // no-op
-          }
-          throw new Error(errorMessage);
-        }
-        const blob = await response.blob();
-        const filename = parseFilename(response.headers.get("Content-Disposition"));
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      };
-
-      const streamProgress = (jobId) =>
-        new Promise((resolve, reject) => {
-          const source = new EventSource(`/stream/${jobId}`);
-          activeSource = source;
-
-          source.onmessage = async (event) => {
-            let payload;
-            try {
-              payload = JSON.parse(event.data);
-            } catch (err) {
-              return;
-            }
-
-            if (payload.type === "log") {
-              if (loaderLog) {
-                loaderLog.textContent = payload.message;
-              }
-            } else if (payload.type === "done") {
-              if (loaderLog) {
-                loaderLog.textContent = "Preparing your download...";
-              }
-              source.close();
-              activeSource = null;
-              try {
-                await downloadResult(jobId);
-                resetUi();
-                resolve();
-              } catch (error) {
-                resetUi();
-                reject(error);
-              }
-            } else if (payload.type === "error") {
-              source.close();
-              activeSource = null;
-              resetUi();
-              reject(new Error(payload.message || "Scraping failed. Please try again."));
-            }
-          };
-
-          source.onerror = () => {
-            source.close();
-            activeSource = null;
-            resetUi();
-            reject(new Error("Lost connection while receiving progress updates."));
-          };
-        });
-
-      if (form && loader && loaderLog && loaderMessage && submitButton) {
-        form.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          hideError();
-
-          const formData = new FormData(form);
-          const keyword = (formData.get("keyword") || "").toString().trim();
-          const location = (formData.get("location") || "").toString().trim();
-
-          if (!keyword || !location) {
-            showError("Both job title and location are required.");
-            return;
-          }
-
-          setLoaderState(true);
-          loaderLog.textContent = "Contacting LinkedIn...";
-
-          try {
-            const response = await fetch("/scrape", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ keyword, location }),
-            });
-            let body = {};
-            try {
-              body = await response.json();
-            } catch (parseError) {
-              body = {};
-            }
-            if (!response.ok) {
-              throw new Error(body?.error || "Failed to start the scraper.");
-            }
-            if (!body?.job_id) {
-              throw new Error("Scraper started but no job id was returned.");
-            }
-            await streamProgress(body.job_id);
-          } catch (err) {
-            showError(err.message || "An unexpected error occurred while scraping.");
-            resetUi();
-          }
-        });
-      }
-    </script>
-  </body>
+function reset(clearProgress = true) {
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Start Scraping';
+  if (eventSource) { eventSource.close(); eventSource = null; }
+  if (clearProgress) progressSection.hidden = true;
+}
+</script>
+</body>
 </html>

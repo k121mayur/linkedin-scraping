@@ -1,83 +1,72 @@
-# LinkedIn Scraping Service
+# Prompt-Driven LinkedIn Job Extraction Engine
 
-Automated LinkedIn job scraper built with Flask, Playwright, and pandas. The service runs both locally and inside containers, exposes a simple UI, and automatically solves LinkedIn email-based verification challenges via Gmail IMAP.
+Describe what you need in plain English — the engine parses your intent, searches LinkedIn, scores relevance, and exports structured results.
 
-## Requirements
+## Quick Start
 
-- Python 3.11+ (for local execution outside Docker)
-- Google IMAP access and an app password for the configured Gmail address
-- Playwright Chromium dependencies (already present in the provided Docker image)
-- Docker + Docker Compose (optional but recommended for deployment)
-- Gunicorn 22+ (installed via `requirements.txt`)
+```bash
+# 1. Set up environment
+cp .env.example .env
+# Edit .env with your LinkedIn credentials and LLM key
+
+# 2. Install dependencies
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+
+# 3. Dry-run test (no LinkedIn calls)
+DRY_RUN=true python app.py
+
+# 4. Real run
+DRY_RUN=false python app.py
+```
+
+Open http://localhost:5000 and enter a prompt like:
+
+> Extract NGO sector accountant and junior financial analyst roles in India, max 100 jobs
 
 ## Environment Variables
 
-Duplicate `.env.example` (or create `.env`) with the following keys:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LINKEDIN_EMAIL` | — | LinkedIn login email |
+| `LINKEDIN_PASSWORD` | — | LinkedIn password |
+| `LLM_PROVIDER` | `ollama` | `openai`, `ollama`, or `anthropic` |
+| `LLM_API_KEY` | — | API key (x-api-key for Ollama) |
+| `LLM_BASE_URL` | `https://ollama.siliconmango.in` | Base URL for Ollama |
+| `LLM_MODEL` | `gemma4:31b` | Model name |
+| `DRY_RUN` | `true` | Mock mode — no LinkedIn or LLM calls |
+| `RELEVANCE_THRESHOLD` | `0.65` | Min score to include a job |
+| `MAX_JOBS_DEFAULT` | `100` | Default job target |
+| `PORT` | `5000` | Flask port |
+
+## Architecture
 
 ```
-LINKEDIN_EMAIL=you@example.com
-LINKEDIN_PASSWORD=super-secret
-LINKEDIN_AUTH_FILE=playwright_auth.json
-DEFAULT_KEYWORD=Software Engineer
-DEFAULT_LOCATION=India
-PLAYWRIGHT_HEADLESS=true
-FLASK_DEBUG=false
-PORT=5000
-
-GMAIL_USERNAME=shgplusplus@gmail.com
-GMAIL_APP_PASSWORD=app-password-generated-via-google  # remove spaces/non-breaking spaces when pasting
-GMAIL_IMAP_HOST=imap.gmail.com
-GMAIL_IMAP_PORT=993
-GMAIL_IMAP_FOLDER=INBOX
-GMAIL_VERIFICATION_SENDER=security-noreply@linkedin.com
-GMAIL_POLL_INTERVAL=8
-GMAIL_POLL_TIMEOUT=180
+User Prompt → [LLM Parser] → SearchPlan
+  → [Search Strategy] → (query, location) queue
+    → [LinkedIn Client] → job cards
+      → [Job Extractor] → full detail
+        → [Relevance Filter] → scored jobs
+          → [Database] → SQLite persistence
+            → [Exporter] → xlsx/csv/json
 ```
 
-> Keep Gmail secrets private; the scraper needs IMAP access to fetch verification codes automatically.
-
-## Running Locally (Python)
+## Docker
 
 ```bash
-python -m venv .venv
-source .venv/Scripts/activate  # PowerShell: .\.venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r requirements.txt
-python final_scrapping_script.py
+docker compose build && docker compose up
 ```
 
-Playwright browsers are bundled in the Docker base image. For local runs install Chromium once:
+## API
 
-```bash
-playwright install chromium
-```
+- `POST /scrape` — `{"prompt": "...", "max_jobs": 100}` → `{"run_id": 1}`
+- `GET /stream/<run_id>` — SSE progress stream
+- `GET /download/<run_id>/xlsx` — Excel export
+- `GET /download/<run_id>/csv` — CSV export
+- `GET /download/<run_id>/json` — JSON export
+- `GET /runs/<run_id>` — Run metadata + jobs
 
-## Running with Docker
+## Dry-Run Mode
 
-```bash
-docker compose build
-docker compose up
-```
-
-The service listens on port `5000` by default (`http://localhost:5000`). Override by exporting `PORT` (Compose and the Dockerfile run `gunicorn -b 0.0.0.0:${PORT:-5000}`), e.g. `PORT=8080 docker compose up`.
-
-## Production (Render / Gunicorn)
-
-- The container now starts via Gunicorn: `gunicorn -b 0.0.0.0:${PORT:-5000} --threads 4 --timeout 360 final_scrapping_script:app`.
-- Set Render’s start command to `gunicorn -b 0.0.0.0:$PORT --threads 4 --timeout 360 final_scrapping_script:app` (Render injects `PORT` at runtime; never hard-code it).
-- Ensure `.env` or Render environment variables include the Gmail and LinkedIn credentials; do not commit secrets.
-
-## Troubleshooting
-
-- **Verification loops**: confirm IMAP settings and that Gmail labels/deliverability still include LinkedIn emails. Logs will show “Waiting for LinkedIn verification email…” if the code cannot be fetched.
-- **Playwright browser crashes**: increase `shm_size` in Docker (`docker-compose.yml` already uses `1gb`). For self-hosted deployments, ensure the host has 1 GB+ shared memory.
-- **LinkedIn rate limiting**: consider rotating headless/headful mode, or throttle scraping frequency; repeated verification prompts indicate suspicious automation activity.
-
-## Code Overview
-
-- `final_scrapping_script.py` – Flask routes, scraping logic, verification helpers, and Gunicorn app factory.
-- `config.py` – loads environment variables and defaults.
-- `templates/index.html` – simple UI for kicking off a scrape.
-- `docker-compose.yml` / `Dockerfile` – container build and runtime configuration (Gunicorn-based).
-
-Contributions, bug reports, and pull requests are welcome!
+Set `DRY_RUN=true` to test the full pipeline without touching LinkedIn or calling any LLM. All searches return mock data, scores use keyword matching.
