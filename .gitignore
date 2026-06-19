@@ -23,3 +23,7 @@ Thumbs.db
 *.xlsx
 *.db
 __pycache__/
+
+# Claude Code auto-memory
+.claude/auto-memory/dirty-files*
+.CLAUDE.md
