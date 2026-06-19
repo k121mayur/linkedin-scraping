@@ -77,7 +77,7 @@ engine/
   database.py           SQLite: search_runs, jobs, search_attempts; auto-inits on import
   exporter.py           xlsx (pandas/openpyxl) / csv / json; EXPORT_COLUMNS list canonical
   llm_client.py         pluggable LLM over urllib: openai / ollama / anthropic
-templates/index.html    web UI — two-column hero layout (left: lede + feature tiles; right: glass action panel); prompt form with example-prompt chips; live progress bar via EventSource; Space Grotesk + Poppins fonts; dark design system with CSS custom properties
+templates/index.html    web UI — centered single-column hero (intro eyebrow/h1/p stacked above glass action panel); prompt textarea + India-focused example-prompt chips + max-job presets (50/100/250); live progress bar (3-stat grid: Collected/Target/Passes) via EventSource; Space Grotesk + Poppins fonts; dark design system with CSS custom properties; vanilla JS only
 data/                   auto-created; jobs.db + exports (git-ignored)
 _archive/               superseded standalone scripts — reference only, NOT live code
 ```
