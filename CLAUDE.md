@@ -70,7 +70,7 @@ engine/
   prompt_parser.py      prompt → SearchPlan (LLM, _heuristic_parse fallback)
   search_strategy.py    builds primary + relaxed (broadening) SearchItem queues
   self_refinement.py    ORCHESTRATOR — generator, yields Progress, loops to max_jobs/max_attempts(40)
-  linkedin_client.py    Playwright driver (module-global _browser/_context/_page singletons)
+  linkedin_client.py    Playwright driver (module-global _pw/_browser/_context/_page singletons)
   email_verifier.py     Gmail IMAP client — fetches LinkedIn email-PIN codes for automated login
   job_extractor.py      detail_pass() enriches relevant cards with full descriptions
   relevance.py          batched LLM 0.0–1.0 scoring, _keyword_score fallback
@@ -103,7 +103,7 @@ HTTP endpoints (in `app.py`): `GET /`, `POST /scrape` (→ run_id), `GET /stream
 <!-- AUTO-MANAGED: patterns -->
 ## Detected Patterns
 
-- **Generator-based orchestration**: `self_refinement.run()` is a generator that `yield`s `Progress` dataclasses (consumed by the Flask SSE stream) and `return`s the final job list.
+- **Generator-based orchestration**: `self_refinement.run()` is a generator that `yield`s `Progress` dataclasses (consumed by the Flask SSE stream) and `return`s the final job list. Calls `li_close()` at the end of each run to release the Playwright browser.
 - **Two-phase scoring**: relevance is scored on card data first (cheap, title/company only); `detail_pass` fetches full descriptions only for jobs that pass the threshold. Gated by `FETCH_DETAILS` env var.
 - **LLM + heuristic fallback pair**: `prompt_parser` and `relevance` each have an LLM path and a keyword/regex fallback (`_heuristic_parse`, `_keyword_score`) selected on `DRY_RUN` or LLM failure.
 - **Provider dispatch map**: `llm_client` selects `_call_openai`/`_call_ollama`/`_call_anthropic` from a dict keyed on `LLM_PROVIDER`.
@@ -112,6 +112,10 @@ HTTP endpoints (in `app.py`): `GET /`, `POST /scrape` (→ run_id), `GET /stream
 - **Background-thread + queue + SSE**: `POST /scrape` returns immediately; work runs in a daemon thread pushing `Progress` onto a per-run `queue.Queue` drained by `GET /stream/<run_id>`.
 - **Thread-local SQLite** with WAL mode; dedup by unique `linkedin_job_id` via `seen_job_ids()`.
 - **Automated email-PIN login**: `linkedin_client` detects LinkedIn's email-verification challenge and delegates to `email_verifier.fetch_verification_code()` (Gmail IMAP) when `GMAIL_*` vars are configured.
+- **Saved-session reuse**: `_ensure_auth()` tries to restore auth from `AUTH_FILE_PATH` (Playwright storage state) before doing a full login; saves state on successful login.
+- **Paginated card extraction**: `search()` loops up to `MAX_SEARCH_PAGES`, calling `_wait_for_cards()` → `_scroll_to_load()` → `_extract_cards()` (DOM evaluation keyed on `/jobs/view/<id>` anchors). Stops early when no new cards appear.
+- **Canonical job links**: `canonical_view_url(job_id)` is the single source of truth for clickable job URLs, using the `LINKEDIN_JOB_VIEW_URL` config knob.
+- **Progressive broadening via `SearchItem.action`**: each item in the search queue carries an `action` tag (`seed` | `broaden_query` | `widen_location` | `relax_filters`); `build_relaxed_queue(plan, attempts)` escalates strategies across attempt thresholds (0-3, 0-6, 0-9, then broad single-word).
 
 <!-- END AUTO-MANAGED -->
 
