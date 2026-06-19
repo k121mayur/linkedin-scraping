@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from config import FETCH_DETAILS, JOBS_PER_PAGE
 from engine import database as db
 from engine.search_strategy import build_queue, build_relaxed_queue
 from engine.linkedin_client import search as li_search, close as li_close
@@ -23,15 +24,24 @@ class Progress:
 
 
 def run(prompt: str, parsed_plan: dict, max_jobs: int, run_id=None):
-    """Execute the full extraction pipeline. Yields Progress, returns final job list."""
+    """Execute the full extraction pipeline. Yields Progress, returns final job list.
+
+    Per query: gather cards (paginated, bounded by need) → score relevance on the
+    card (cheap, title-driven) → enrich the relevant ones with full details (which
+    also guarantees a valid link) → persist. Keeps going through the primary queue
+    and, if still short, broadened queries, until the target count is reached or
+    candidates are genuinely exhausted.
+    """
     if run_id is None:
         run_id = db.create_run(prompt, max_jobs, parsed_plan)
-    collected: list[dict] = []
-    seen: set[str] = db.seen_job_ids(run_id)
-    attempts = 0
-    max_attempts = 25
+    parsed_plan["_original_prompt"] = prompt
 
-    # Build the search queue
+    collected: list[dict] = []
+    seen: set[str] = db.seen_job_ids(run_id)   # persisted dedup (this run)
+    examined: set[str] = set()                 # cards already scored this run
+    attempts = 0
+    max_attempts = 40
+
     queue = build_queue(parsed_plan)
     relaxed_attempts = 0
 
@@ -46,10 +56,11 @@ def run(prompt: str, parsed_plan: dict, max_jobs: int, run_id=None):
 
         item = queue.pop(0)
         db.log_attempt(run_id, item.query, item.location, action=item.action)
+        need = max_jobs - len(collected)
 
-        # Search
+        # Search (paginated, bounded so we don't over-scrape for a small target).
         try:
-            cards = li_search(item.query, item.location)
+            cards = li_search(item.query, item.location, limit=max(need * 2, JOBS_PER_PAGE))
         except Exception as e:
             db.log_attempt(run_id, item.query, item.location, action=item.action, error=str(e))
             yield Progress(
@@ -60,24 +71,48 @@ def run(prompt: str, parsed_plan: dict, max_jobs: int, run_id=None):
             )
             continue
 
-        if not cards:
-            db.log_attempt(run_id, item.query, item.location, action=item.action, cards=0, relevant=0)
+        # Drop cards already scored/collected in this run.
+        fresh = [c for c in cards if c["job_id"] not in examined and c["job_id"] not in seen]
+        for c in fresh:
+            examined.add(c["job_id"])
+
+        if not fresh:
+            db.log_attempt(run_id, item.query, item.location,
+                           action=item.action, cards=len(cards), relevant=0)
+            yield Progress(
+                run_id=run_id, collected=len(collected), target=max_jobs,
+                attempts=attempts, current_query=item.query, current_location=item.location,
+            )
             continue
 
-        # Enrich with details
-        limit = max_jobs - len(collected)
-        jobs = detail_pass(cards, limit, seen)
+        # Score relevance on card data (title/company) — strict, no navigation.
+        relevant = filter_relevant(fresh, parsed_plan)
+        relevant.sort(key=lambda j: j.get("relevance_score", 0), reverse=True)
+        to_take = relevant[:need]
 
-        # Filter by relevance
-        parsed_plan["_original_prompt"] = prompt
-        relevant = filter_relevant(jobs, parsed_plan)
+        # Enrich only the jobs we'll keep — adds the full description and a
+        # guaranteed canonical apply_url.
+        if FETCH_DETAILS and to_take:
+            enriched = detail_pass(to_take, limit=len(to_take), seen_ids=seen)
+        else:
+            enriched = []
+            for c in to_take:
+                c.setdefault("linkedin_job_id", c.get("job_id", ""))
+                c.setdefault("apply_url", c.get("link", ""))
+                enriched.append(c)
 
-        # Save to DB
-        for job in relevant:
-            if job.get("linkedin_job_id") not in seen:
-                db.upsert_job(job, run_id, prompt)
-                collected.append(job)
-                seen.add(job["linkedin_job_id"])
+        for job in enriched:
+            jid = job.get("linkedin_job_id") or job.get("job_id")
+            if not jid or jid in seen:
+                continue
+            job["linkedin_job_id"] = jid
+            if not job.get("apply_url"):
+                job["apply_url"] = job.get("link", "")
+            db.upsert_job(job, run_id, prompt)
+            collected.append(job)
+            seen.add(jid)
+            if len(collected) >= max_jobs:
+                break
 
         db.log_attempt(
             run_id, item.query, item.location,

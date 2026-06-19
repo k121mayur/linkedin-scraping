@@ -15,21 +15,21 @@ class SearchItem:
 
 
 def build_queue(plan: dict) -> list[SearchItem]:
-    """Primary queue: each role × each location, with and without sector boost."""
+    """Primary queue: each role variant × each location.
+
+    Role keywords are already specific, expanded title variants (e.g. "software
+    developer", "software engineer", "full stack developer"), so we search them
+    plainly — LinkedIn's keyword search handles plain titles far better than
+    Boolean sector phrases, and relevance scoring (which sees the original
+    prompt, including any sector) filters off-topic results afterwards.
+    """
     roles = plan.get("role_keywords", ["jobs"])
     locations = plan.get("locations", ["India"])
-    sector_kws = plan.get("sector_keywords", [])
 
     items = []
     for role in roles:
         for loc in locations:
-            # With sector
-            if sector_kws:
-                sector_phrase = " OR ".join(f'"{s}"' for s in sector_kws[:3])
-                items.append(SearchItem(f"{role} ({sector_phrase})", loc))
-            # Without sector
             items.append(SearchItem(role, loc))
-
     return items
 
 
