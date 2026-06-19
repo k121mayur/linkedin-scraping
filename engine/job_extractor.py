@@ -30,11 +30,13 @@ def detail_pass(cards: list[dict], limit: int, seen_ids: Optional[set[str]] = No
         if job_id in seen:
             continue
 
-        detail = get_job_detail(card.get("link", ""))
-        if detail is None:
-            continue
+        link = card.get("link", "")
+        detail = get_job_detail(link) or {}
 
         merged = {**card, **detail, "linkedin_job_id": job_id}
+        # Guarantee a usable link even if detail parsing came back empty.
+        if not merged.get("apply_url"):
+            merged["apply_url"] = link
         results.append(merged)
         seen.add(job_id)
         count += 1
