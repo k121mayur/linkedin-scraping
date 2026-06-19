@@ -3,217 +3,793 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LinkedIn Job Scraper — Prompt-Driven</title>
+  <title>Silicon Mango — Prompt-Driven LinkedIn Job Extraction</title>
+  <meta name="description" content="Describe the roles you need in plain English. The engine builds a structured search plan, scores every result for relevance, and hands you a clean export.">
+  <meta name="theme-color" content="#080d18">
+  <meta property="og:title" content="Silicon Mango — Prompt-Driven LinkedIn Job Extraction">
+  <meta property="og:description" content="Turn one sentence into a ranked list of LinkedIn jobs.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='1' stop-color='%230ea5e9'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ccircle cx='15' cy='15' r='6.5' fill='none' stroke='%23071226' stroke-width='2.6'/%3E%3Cline x1='19.6' y1='19.6' x2='24.5' y2='24.5' stroke='%23071226' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='25' cy='7' r='3' fill='%23fbbf24'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0f172a;
-      --card-bg: linear-gradient(135deg, rgba(38,70,83,0.35), rgba(8,151,157,0.25));
+
+      --bg-base: #080d18;
+      --bg-1: #0b1322;
+      --bg-2: #0f1b30;
+      --panel: rgba(16, 27, 48, 0.66);
+      --line: rgba(148, 179, 219, 0.14);
+      --line-strong: rgba(148, 179, 219, 0.28);
+
+      --text: #eef4fb;
+      --text-soft: #abbace;
+      --text-faint: #6c7d95;
+
       --accent: #0ea5e9;
-      --accent-strong: #38bdf8;
-      --text: #f9fafb;
-      --text-muted: rgba(248,250,252,0.7);
-      --error: #f87171;
-      --success: #4ade80;
+      --accent-2: #38bdf8;
+      --accent-3: #22d3ee;
+      --accent-soft: rgba(14, 165, 233, 0.14);
+      --mango: #fbbf24;
+      --success: #34d399;
+      --danger: #f87171;
+
+      --font-display: 'Space Grotesk', 'Poppins', sans-serif;
+      --font-body: 'Poppins', system-ui, -apple-system, sans-serif;
+
+      --r-sm: 12px;
+      --r-md: 16px;
+      --r-lg: 24px;
+      --shadow: 0 32px 80px -30px rgba(2, 8, 23, 0.9);
+      --ring: 0 0 0 3px rgba(14, 165, 233, 0.28);
+
+      --z-grain: 1;
+      --z-content: 2;
     }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
     body {
-      min-height: 100vh;
+      min-height: 100dvh;
+      font-family: var(--font-body);
+      color: var(--text);
+      background: var(--bg-base);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      line-height: 1.55;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* Ambient depth: tinted radial glows + faint grid, layered behind everything */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(900px 600px at 85% -10%, rgba(56, 189, 248, 0.16), transparent 60%),
+        radial-gradient(700px 520px at 8% 100%, rgba(34, 211, 238, 0.10), transparent 55%),
+        radial-gradient(1200px 800px at 50% -20%, rgba(15, 27, 48, 0.9), transparent 70%),
+        linear-gradient(180deg, var(--bg-1), var(--bg-base) 70%);
+    }
+    /* Fine grain overlay — breaks digital flatness */
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: var(--z-grain);
+      pointer-events: none;
+      opacity: 0.04;
+      mix-blend-mode: overlay;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+
+    .skip-link {
+      position: absolute;
+      left: 1rem;
+      top: -3rem;
+      z-index: 10;
+      padding: 0.6rem 1rem;
+      border-radius: var(--r-sm);
+      background: var(--accent);
+      color: #04121f;
+      font-weight: 600;
+      transition: top 160ms ease;
+    }
+    .skip-link:focus { top: 1rem; }
+
+    .page {
+      position: relative;
+      z-index: var(--z-content);
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      padding: clamp(1.25rem, 3vw, 2.25rem);
+    }
+
+    .shell { width: min(1180px, 100%); margin: 0 auto; }
+
+    /* ---------- Masthead ---------- */
+    .masthead {
       display: flex;
       align-items: center;
-      justify-content: center;
-      font-family: 'Poppins', sans-serif;
-      background: radial-gradient(circle at top left, #0f172a, #111827);
-      color: var(--text);
-      padding: 2rem 1rem;
+      justify-content: space-between;
+      gap: 1rem;
+      padding-bottom: clamp(1.5rem, 4vw, 3rem);
     }
-    .card {
-      width: min(680px, 100%);
-      border-radius: 24px;
-      padding: clamp(2rem, 4vw, 3rem);
-      backdrop-filter: blur(18px);
-      background: var(--card-bg);
-      border: 1px solid rgba(148,163,184,0.25);
-      box-shadow: 0 30px 70px -20px rgba(15,23,42,0.8);
+    .brand { display: flex; align-items: center; gap: 0.7rem; }
+    .brand__mark {
+      width: 40px; height: 40px;
+      border-radius: 11px;
+      display: grid; place-items: center;
+      background: linear-gradient(140deg, var(--accent-2), var(--accent));
+      box-shadow: 0 8px 22px -8px rgba(14, 165, 233, 0.7), inset 0 1px 0 rgba(255,255,255,0.35);
     }
-    h1 { font-size: 1.8rem; font-weight: 600; margin-bottom: 0.5rem; }
-    .subtitle { color: var(--text-muted); margin-bottom: 2rem; }
-    form { display: grid; gap: 1.2rem; }
-    label { display: grid; gap: 0.5rem; font-size: 0.9rem; color: var(--text-muted); }
-    textarea {
-      width: 100%;
-      min-height: 100px;
-      border-radius: 14px;
-      padding: 1rem 1.2rem;
-      background: rgba(15,23,42,0.6);
-      border: 1px solid rgba(148,163,184,0.2);
-      color: var(--text);
-      font-size: 1rem;
-      font-family: inherit;
-      resize: vertical;
-      transition: border-color 160ms;
-    }
-    textarea:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(14,165,233,0.15);
-    }
-    .row { display: flex; gap: 1rem; align-items: center; }
-    input[type="number"] {
-      width: 100px;
-      border-radius: 14px;
-      padding: 0.7rem 1rem;
-      background: rgba(15,23,42,0.6);
-      border: 1px solid rgba(148,163,184,0.2);
-      color: var(--text);
-      font-size: 1rem;
-    }
-    input[type="number"]:focus {
-      outline: none;
-      border-color: var(--accent);
-    }
-    button {
-      justify-self: start;
-      border: none;
-      border-radius: 14px;
-      padding: 0.95rem 2.4rem;
-      font-size: 1.05rem;
+    .brand__mark svg { width: 22px; height: 22px; }
+    .brand__name {
+      font-family: var(--font-display);
       font-weight: 600;
-      color: #0b1120;
-      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
-      box-shadow: 0 18px 30px -15px rgba(14,165,233,0.9);
-      cursor: pointer;
-      transition: transform 150ms, box-shadow 150ms;
+      font-size: 1.02rem;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
     }
-    button:hover { transform: translateY(-2px); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .brand__name span { color: var(--mango); }
+    .brand__tag {
+      font-size: 0.72rem;
+      color: var(--text-faint);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.45rem 0.85rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(13, 22, 39, 0.6);
+      font-size: 0.78rem;
+      color: var(--text-soft);
+      backdrop-filter: blur(8px);
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+      animation: pulse 2.6s ease-out infinite;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.45); }
+      70% { box-shadow: 0 0 0 7px rgba(52, 211, 153, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+    }
+
+    /* ---------- Hero grid ---------- */
+    main.shell {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: clamp(1.5rem, 4vw, 2.4rem);
+      padding: clamp(0.5rem, 2vw, 1.25rem) 0 clamp(2rem, 5vw, 3rem);
+    }
+
+    /* ---------- Intro (kept deliberately minimal — the panel is the focus) ---------- */
+    .intro { max-width: 40rem; text-align: center; }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 0.8rem 0.35rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--accent-soft);
+      color: var(--accent-2);
+      font-size: 0.74rem;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      margin-bottom: 1.05rem;
+    }
+    .eyebrow b {
+      font-family: var(--font-display);
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #04121f;
+      background: var(--accent-2);
+      padding: 0.12rem 0.4rem;
+      border-radius: 5px;
+    }
+    h1 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: clamp(1.65rem, 3.4vw, 2.45rem);
+      line-height: 1.07;
+      letter-spacing: -0.025em;
+      text-wrap: balance;
+      margin-bottom: 0.65rem;
+    }
+    h1 .grad {
+      background: linear-gradient(105deg, var(--accent-3), var(--accent-2) 60%, var(--accent));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .intro p {
+      color: var(--text-soft);
+      font-size: clamp(0.94rem, 1.3vw, 1.04rem);
+      max-width: 48ch;
+      margin: 0 auto;
+      text-wrap: pretty;
+    }
+
+    /* ---------- Right: the action panel ---------- */
+    .panel {
+      position: relative;
+      width: min(700px, 100%);
+      border-radius: var(--r-lg);
+      padding: clamp(1.6rem, 3.4vw, 2.6rem);
+      background: var(--panel);
+      border: 1px solid var(--line-strong);
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+      box-shadow:
+        0 0 0 1px rgba(56, 189, 248, 0.07),
+        0 44px 100px -34px rgba(2, 8, 23, 0.95),
+        0 0 90px -28px rgba(56, 189, 248, 0.38);
+    }
+    /* glass edge highlight */
+    .panel::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      padding: 1px;
+      background: linear-gradient(160deg, rgba(255,255,255,0.16), transparent 35%);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+    }
+
+    .panel__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.4rem;
+    }
+    .panel__title {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 1.12rem;
+      letter-spacing: -0.01em;
+    }
+    .panel__sub { font-size: 0.82rem; color: var(--text-faint); margin-top: 0.1rem; }
+
     .error-box {
-      padding: 1rem 1.25rem;
-      border-radius: 12px;
-      background: rgba(248,113,113,0.12);
-      border: 1px solid rgba(248,113,113,0.35);
-      color: var(--error);
-      margin-bottom: 1rem;
+      display: flex;
+      gap: 0.6rem;
+      align-items: flex-start;
+      padding: 0.85rem 1rem;
+      border-radius: var(--r-sm);
+      background: rgba(248, 113, 113, 0.1);
+      border: 1px solid rgba(248, 113, 113, 0.32);
+      color: #fecaca;
+      font-size: 0.88rem;
+      margin-bottom: 1.1rem;
     }
+    .error-box svg { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--danger); }
+
+    form { display: grid; gap: 1.15rem; }
+    .field { display: grid; gap: 0.55rem; }
+    .field__label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.5rem;
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--text-soft);
+    }
+    .field__hint { font-size: 0.74rem; color: var(--text-faint); font-weight: 400; }
+
+    textarea, input[type="number"] {
+      width: 100%;
+      font-family: inherit;
+      color: var(--text);
+      background: rgba(8, 14, 26, 0.6);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--r-sm);
+      transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+    }
+    textarea {
+      min-height: 116px;
+      padding: 0.95rem 1.05rem;
+      font-size: 0.98rem;
+      line-height: 1.6;
+      resize: vertical;
+    }
+    textarea::placeholder { color: var(--text-faint); }
+    textarea:focus-visible, input[type="number"]:focus-visible {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: var(--ring);
+      background: rgba(8, 14, 26, 0.85);
+    }
+
+    /* example prompt chips */
+    .chips-group { display: grid; gap: 0.55rem; }
+    .chips__title { font-size: 0.74rem; color: var(--text-faint); }
+    .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .chip {
+      font-family: inherit;
+      font-size: 0.75rem;
+      color: var(--text-soft);
+      padding: 0.38rem 0.7rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(13, 22, 39, 0.5);
+      cursor: pointer;
+      transition: color 150ms, border-color 150ms, background 150ms, transform 120ms;
+    }
+    .chip:hover { color: var(--text); border-color: var(--line-strong); background: rgba(56,189,248,0.08); }
+    .chip:active { transform: scale(0.97); }
+    .chip:focus-visible { outline: none; box-shadow: var(--ring); }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 1rem;
+      align-items: end;
+    }
+    .count-field { display: grid; gap: 0.55rem; }
+    .count-row { display: flex; align-items: center; gap: 0.5rem; }
+    input[type="number"] {
+      width: 84px;
+      padding: 0.72rem 0.6rem 0.72rem 0.85rem;
+      font-size: 0.98rem;
+      font-variant-numeric: tabular-nums;
+      -moz-appearance: textfield;
+    }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .preset {
+      font-family: var(--font-display);
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--text-faint);
+      width: 42px;
+      padding: 0.55rem 0;
+      border-radius: 9px;
+      border: 1px solid var(--line);
+      background: transparent;
+      cursor: pointer;
+      transition: color 150ms, border-color 150ms, background 150ms;
+    }
+    .preset:hover { color: var(--text); border-color: var(--line-strong); }
+    .preset.is-active { color: var(--accent-2); border-color: rgba(56,189,248,0.5); background: var(--accent-soft); }
+    .preset:focus-visible { outline: none; box-shadow: var(--ring); }
+
+    .submit {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.55rem;
+      border: none;
+      border-radius: var(--r-sm);
+      padding: 0.92rem 1.7rem;
+      font-family: var(--font-display);
+      font-size: 0.98rem;
+      font-weight: 600;
+      letter-spacing: -0.005em;
+      color: #04121f;
+      background: linear-gradient(135deg, var(--accent-2), var(--accent));
+      box-shadow: 0 16px 30px -16px rgba(14, 165, 233, 0.9), inset 0 1px 0 rgba(255,255,255,0.4);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease;
+    }
+    .submit:hover { transform: translateY(-2px); box-shadow: 0 22px 38px -16px rgba(14, 165, 233, 0.95), inset 0 1px 0 rgba(255,255,255,0.4); }
+    .submit:active { transform: translateY(0) scale(0.985); }
+    .submit:focus-visible { outline: none; box-shadow: var(--ring), 0 16px 30px -16px rgba(14,165,233,0.9); }
+    .submit:disabled { cursor: progress; filter: saturate(0.7) brightness(0.9); transform: none; }
+    .submit svg { width: 17px; height: 17px; }
+    .submit .spinner { display: none; animation: spin 0.8s linear infinite; }
+    .submit.is-busy .arrow { display: none; }
+    .submit.is-busy .spinner { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     [hidden] { display: none !important; }
-    .progress-section {
+
+    /* ---------- Progress ---------- */
+    .progress {
       margin-top: 1.5rem;
-      padding: 1.5rem;
-      border-radius: 14px;
-      background: rgba(15,23,42,0.4);
-      border: 1px solid rgba(148,163,184,0.15);
+      padding-top: 1.4rem;
+      border-top: 1px solid var(--line);
+      display: grid;
+      gap: 1.1rem;
+      animation: fade-up 360ms ease both;
     }
-    .progress-bar {
-      height: 8px;
-      border-radius: 4px;
-      background: rgba(148,163,184,0.15);
-      margin: 0.8rem 0;
+    .progress__head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+    .progress__status {
+      font-family: var(--font-display);
+      font-weight: 500;
+      font-size: 0.98rem;
+      letter-spacing: -0.01em;
+    }
+    .progress[data-state="done"] .progress__status { color: var(--success); }
+    .progress[data-state="error"] .progress__status { color: var(--danger); }
+    .progress__pct {
+      font-family: var(--font-display);
+      font-variant-numeric: tabular-nums;
+      font-size: 0.82rem;
+      color: var(--text-faint);
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.7rem;
+    }
+    .stat {
+      padding: 0.8rem 0.9rem;
+      border-radius: var(--r-sm);
+      background: rgba(8, 14, 26, 0.5);
+      border: 1px solid var(--line);
+    }
+    .stat__num {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 1.5rem;
+      line-height: 1;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat--collected .stat__num { color: var(--accent-2); }
+    .stat__label {
+      display: block;
+      margin-top: 0.35rem;
+      font-size: 0.7rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+    }
+
+    .bar {
+      position: relative;
+      height: 9px;
+      border-radius: 999px;
+      background: rgba(8, 14, 26, 0.7);
+      border: 1px solid var(--line);
       overflow: hidden;
     }
-    .progress-fill {
-      height: 100%;
-      background: linear-gradient(90deg, var(--accent), var(--success));
-      border-radius: 4px;
-      transition: width 0.3s ease;
+    .bar__fill {
+      position: absolute;
+      inset: 0;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-3));
+      transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
     }
-    .progress-info { font-size: 0.9rem; color: var(--text-muted); }
-    .download-links { display: flex; gap: 0.8rem; margin-top: 1rem; flex-wrap: wrap; }
+    /* moving shimmer while running */
+    .progress[data-state="running"] .bar__fill::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+      transform: translateX(-100%);
+      animation: shimmer 1.5s ease-in-out infinite;
+    }
+    @keyframes shimmer { to { transform: translateX(100%); } }
+    .progress[data-state="done"] .bar__fill { background: linear-gradient(90deg, var(--accent), var(--success)); }
+    .progress[data-state="error"] .bar__fill { background: linear-gradient(90deg, #b45309, var(--danger)); }
+
+    .progress__detail { font-size: 0.84rem; color: var(--text-soft); min-height: 1.2em; }
+
+    .downloads { display: flex; flex-wrap: wrap; gap: 0.6rem; animation: fade-up 320ms ease both; }
     .dl-btn {
-      padding: 0.6rem 1.4rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.62rem 1.05rem;
       border-radius: 10px;
-      border: 1px solid var(--accent);
-      background: transparent;
-      color: var(--accent-strong);
-      cursor: pointer;
-      font-size: 0.9rem;
-      font-weight: 500;
-      transition: background 150ms;
-    }
-    .dl-btn:hover { background: rgba(14,165,233,0.12); }
-    footer {
-      margin-top: 2rem;
-      text-align: center;
+      border: 1px solid var(--line-strong);
+      background: rgba(13, 22, 39, 0.55);
+      color: var(--text);
       font-size: 0.85rem;
-      color: var(--text-muted);
+      font-weight: 500;
+      text-decoration: none;
+      transition: border-color 150ms, background 150ms, transform 120ms, color 150ms;
+    }
+    .dl-btn svg { width: 15px; height: 15px; color: var(--accent-2); }
+    .dl-btn:hover { border-color: rgba(56,189,248,0.5); background: var(--accent-soft); transform: translateY(-1px); }
+    .dl-btn:active { transform: translateY(0) scale(0.98); }
+    .dl-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+
+    /* ---------- Footer ---------- */
+    footer {
+      padding-top: clamp(1.5rem, 4vw, 2.5rem);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.8rem;
+      font-size: 0.8rem;
+      color: var(--text-faint);
+    }
+    footer a { color: var(--accent-2); text-decoration: none; transition: color 150ms; }
+    footer a:hover { color: var(--accent-3); }
+    .footer__meta { display: flex; align-items: center; gap: 0.5rem; }
+    .footer__dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-faint); }
+
+    /* ---------- Entry animation ---------- */
+    @keyframes fade-up {
+      from { opacity: 0; transform: translateY(14px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .reveal { opacity: 0; animation: fade-up 620ms cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+    .reveal.d1 { animation-delay: 0.06s; }
+    .reveal.d2 { animation-delay: 0.14s; }
+    .reveal.d3 { animation-delay: 0.22s; }
+    .reveal.d4 { animation-delay: 0.30s; }
+
+    /* ---------- Responsive ---------- */
+    @media (max-width: 920px) {
+      .hero { gap: 2rem; padding-bottom: 1.5rem; }
+      .intro p { max-width: 52ch; }
+    }
+    @media (max-width: 560px) {
+      .controls { grid-template-columns: 1fr; align-items: stretch; }
+      .submit { width: 100%; }
+      .brand__tag { display: none; }
+      .stat { padding: 0.65rem 0.55rem; }
+      .stat__num { font-size: 1.25rem; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+      .reveal { opacity: 1; }
     }
   </style>
 </head>
 <body>
-<div class="card">
-  <h1>Prompt-Driven LinkedIn Scraper</h1>
-  <p class="subtitle">Describe what you need in plain English — we'll find the right jobs.</p>
+  <a class="skip-link" href="#extraction-panel">Skip to the extraction form</a>
 
-  <div id="error" class="error-box" hidden></div>
+  <div class="page">
+    <div class="shell">
 
-  <form id="scrape-form">
-    <label>
-      What jobs are you looking for?
-      <textarea id="prompt" name="prompt" placeholder="e.g. Extract the Jobs in NGO sector for accountant role or junior-level financial roles in India" required></textarea>
-    </label>
-    <div class="row">
-      <label>
-        Max jobs
-        <input type="number" id="max-jobs" name="max_jobs" value="100" min="5" max="500">
-      </label>
-      <button type="submit" id="submit-btn">Start Scraping</button>
-    </div>
-  </form>
+      <header class="masthead reveal">
+        <div class="brand">
+          <span class="brand__mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none">
+              <circle cx="14" cy="14" r="8" stroke="#04121f" stroke-width="2.6"/>
+              <line x1="20" y1="20" x2="26" y2="26" stroke="#04121f" stroke-width="2.6" stroke-linecap="round"/>
+              <circle cx="26" cy="6" r="3" fill="#fbbf24"/>
+            </svg>
+          </span>
+          <span>
+            <span class="brand__name">Silicon <span>Mango</span></span>
+            <span class="brand__tag">Job extraction engine</span>
+          </span>
+        </div>
+        <span class="status-pill"><span class="status-dot" aria-hidden="true"></span> Engine online</span>
+      </header>
 
-  <div id="progress" class="progress-section" hidden>
-    <div class="progress-info" id="progress-text">Initializing...</div>
-    <div class="progress-bar">
-      <div class="progress-fill" id="progress-fill" style="width:0%"></div>
-    </div>
-    <div class="progress-info" id="progress-detail"></div>
-    <div class="download-links" id="download-links" hidden>
-      <a class="dl-btn" id="dl-xlsx" href="#">Download XLSX</a>
-      <a class="dl-btn" id="dl-csv" href="#">Download CSV</a>
-      <a class="dl-btn" id="dl-json" href="#">Download JSON</a>
+      <main class="shell" style="padding:0">
+        <div class="hero">
+
+          <!-- Minimal intro — everything points to the panel below -->
+          <section class="intro reveal d1" aria-labelledby="headline">
+            <span class="eyebrow"><b>AI</b> Prompt-driven extraction</span>
+            <h1 id="headline">Turn one sentence into a <span class="grad">ranked list of LinkedIn jobs</span>.</h1>
+            <p>Describe the roles you need in plain English — the engine plans the search, scores every match, and exports the results.</p>
+          </section>
+
+          <!-- Right: the action panel -->
+          <section id="extraction-panel" class="panel reveal d2" aria-labelledby="panel-title">
+            <div class="panel__head">
+              <div>
+                <div class="panel__title" id="panel-title">New extraction</div>
+                <div class="panel__sub">Describe it, set a target, run it.</div>
+              </div>
+            </div>
+
+            <div id="error" class="error-box" hidden role="alert">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12" y2="16.5"/>
+              </svg>
+              <span id="error-text"></span>
+            </div>
+
+            <form id="scrape-form" novalidate>
+              <div class="field">
+                <span class="field__label">
+                  What roles are you looking for?
+                  <span class="field__hint">be specific — sector, level, location</span>
+                </span>
+                <textarea id="prompt" name="prompt" required
+                  placeholder="e.g. NGO sector accountant and junior-level financial roles across India"></textarea>
+                <div class="chips-group">
+                  <span class="chips__title">Quick starts — tap to fill the prompt (India only)</span>
+                  <div class="chips" aria-label="Example prompts">
+                    <button type="button" class="chip" data-example="NGO sector accountant and junior-level financial roles across India">NGO finance · India</button>
+                    <button type="button" class="chip" data-example="Senior data engineer roles in Bengaluru, India">Data engineer · Bengaluru</button>
+                    <button type="button" class="chip" data-example="Junior UX designer positions in India">UX designer · India</button>
+                    <button type="button" class="chip" data-example="Product manager roles at fintech companies in Mumbai, India">Product manager · Mumbai</button>
+                    <button type="button" class="chip" data-example="Software developer and full-stack engineer roles in Pune, India">Full-stack dev · Pune</button>
+                    <button type="button" class="chip" data-example="HR recruiter and talent acquisition roles in Delhi NCR, India">HR recruiter · Delhi NCR</button>
+                    <button type="button" class="chip" data-example="Digital marketing and SEO specialist roles in India">Digital marketing · India</button>
+                    <button type="button" class="chip" data-example="Business analyst roles at IT services companies in Hyderabad, India">Business analyst · Hyderabad</button>
+                    <button type="button" class="chip" data-example="Sales executive and business development roles across India">Sales &amp; BD · India</button>
+                    <button type="button" class="chip" data-example="Civil engineer and site engineer roles in India">Civil engineer · India</button>
+                    <button type="button" class="chip" data-example="Remote content writer and copywriter roles in India">Content writer · Remote India</button>
+                    <button type="button" class="chip" data-example="Staff nurse and healthcare roles at hospitals in India">Staff nurse · India</button>
+                    <button type="button" class="chip" data-example="Data analyst and BI analyst roles in Bengaluru, India">Data analyst · Bengaluru</button>
+                    <button type="button" class="chip" data-example="Chartered accountant and audit roles in India">Chartered accountant · India</button>
+                    <button type="button" class="chip" data-example="Customer support and operations roles across India">Customer support · India</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="controls">
+                <div class="count-field">
+                  <span class="field__label">Target job count</span>
+                  <div class="count-row">
+                    <input type="number" id="max-jobs" name="max_jobs" value="100" min="5" max="500" aria-label="Target job count">
+                    <button type="button" class="preset" data-preset="50">50</button>
+                    <button type="button" class="preset is-active" data-preset="100">100</button>
+                    <button type="button" class="preset" data-preset="250">250</button>
+                  </div>
+                </div>
+                <button type="submit" id="submit-btn" class="submit">
+                  <span id="submit-label">Start extraction</span>
+                  <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/></svg>
+                  <svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+                </button>
+              </div>
+            </form>
+
+            <div id="progress" class="progress" hidden aria-live="polite">
+              <div class="progress__head">
+                <span class="progress__status" id="progress-text">Initializing…</span>
+                <span class="progress__pct" id="progress-pct">0%</span>
+              </div>
+              <div class="stats">
+                <div class="stat stat--collected">
+                  <span class="stat__num" id="stat-collected">0</span>
+                  <span class="stat__label">Collected</span>
+                </div>
+                <div class="stat">
+                  <span class="stat__num" id="stat-target">0</span>
+                  <span class="stat__label">Target</span>
+                </div>
+                <div class="stat">
+                  <span class="stat__num" id="stat-passes">0</span>
+                  <span class="stat__label">Passes</span>
+                </div>
+              </div>
+              <div class="bar"><div class="bar__fill" id="progress-fill"></div></div>
+              <div class="progress__detail" id="progress-detail"></div>
+              <div class="downloads" id="download-links" hidden>
+                <a class="dl-btn" id="dl-xlsx" href="#" download>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+                  XLSX
+                </a>
+                <a class="dl-btn" id="dl-csv" href="#" download>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+                  CSV
+                </a>
+                <a class="dl-btn" id="dl-json" href="#" download>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+                  JSON
+                </a>
+              </div>
+            </div>
+          </section>
+
+        </div>
+      </main>
+
+      <footer class="reveal d4">
+        <span>Built by <a href="https://www.siliconmango.com" target="_blank" rel="noopener">Silicon Mango</a></span>
+        <span class="footer__meta">
+          <span>Prompt-driven engine</span>
+          <span class="footer__dot" aria-hidden="true"></span>
+          <span>Playwright · LLM relevance scoring</span>
+        </span>
+      </footer>
+
     </div>
   </div>
 
-  <footer>Powered by <a href="https://www.siliconmango.com" style="color:var(--accent-strong)">Silicon Mango</a></footer>
-</div>
-
 <script>
-const form = document.getElementById('scrape-form');
-const errorBox = document.getElementById('error');
-const progressSection = document.getElementById('progress');
-const progressText = document.getElementById('progress-text');
-const progressFill = document.getElementById('progress-fill');
-const progressDetail = document.getElementById('progress-detail');
-const downloadLinks = document.getElementById('download-links');
-const submitBtn = document.getElementById('submit-btn');
-const dlXlsx = document.getElementById('dl-xlsx');
-const dlCsv = document.getElementById('dl-csv');
-const dlJson = document.getElementById('dl-json');
-let eventSource = null;
+const $ = (id) => document.getElementById(id);
+const form = $('scrape-form');
+const errorBox = $('error');
+const errorText = $('error-text');
+const promptEl = $('prompt');
+const maxJobsEl = $('max-jobs');
+const submitBtn = $('submit-btn');
+const submitLabel = $('submit-label');
+const progressSection = $('progress');
+const progressText = $('progress-text');
+const progressPct = $('progress-pct');
+const progressFill = $('progress-fill');
+const progressDetail = $('progress-detail');
+const statCollected = $('stat-collected');
+const statTarget = $('stat-target');
+const statPasses = $('stat-passes');
+const downloadLinks = $('download-links');
+const dlXlsx = $('dl-xlsx');
+const dlCsv = $('dl-csv');
+const dlJson = $('dl-json');
 
-function showError(msg) {
-  errorBox.textContent = msg;
-  errorBox.hidden = false;
-}
-function hideError() {
-  errorBox.hidden = true;
+let eventSource = null;
+let lastCollected = 0;
+
+function showError(msg) { errorText.textContent = msg; errorBox.hidden = false; }
+function hideError() { errorBox.hidden = true; }
+
+// Example prompt chips fill the textarea
+document.querySelectorAll('[data-example]').forEach((el) => {
+  el.addEventListener('click', () => { promptEl.value = el.dataset.example; promptEl.focus(); });
+});
+
+// Target-count presets
+const presetEls = document.querySelectorAll('[data-preset]');
+presetEls.forEach((el) => {
+  el.addEventListener('click', () => {
+    maxJobsEl.value = el.dataset.preset;
+    presetEls.forEach((p) => p.classList.toggle('is-active', p === el));
+  });
+});
+// Keep preset highlight in sync if the user types a custom value
+maxJobsEl.addEventListener('input', () => {
+  presetEls.forEach((p) => p.classList.toggle('is-active', p.dataset.preset === maxJobsEl.value));
+});
+
+function setBusy(busy) {
+  submitBtn.disabled = busy;
+  submitBtn.classList.toggle('is-busy', busy);
+  submitLabel.textContent = busy ? 'Scraping…' : 'Start extraction';
 }
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   hideError();
-  const prompt = document.getElementById('prompt').value.trim();
-  const maxJobs = parseInt(document.getElementById('max-jobs').value) || 100;
-  if (!prompt) { showError('Please enter a job description.'); return; }
+  const prompt = promptEl.value.trim();
+  const maxJobs = parseInt(maxJobsEl.value, 10) || 100;
+  if (!prompt) { showError('Enter what roles you want to find.'); promptEl.focus(); return; }
 
-  submitBtn.disabled = true;
-  submitBtn.textContent = 'Scraping...';
+  setBusy(true);
   progressSection.hidden = false;
+  progressSection.dataset.state = 'running';
   downloadLinks.hidden = true;
+  lastCollected = 0;
   progressFill.style.width = '0%';
-  progressText.textContent = 'Parsing your request...';
-  progressDetail.textContent = '';
+  progressPct.textContent = '0%';
+  progressText.textContent = 'Parsing your request…';
+  progressDetail.textContent = 'Building a structured search plan from your prompt.';
+  statCollected.textContent = '0';
+  statTarget.textContent = String(maxJobs);
+  statPasses.textContent = '0';
+  progressSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
   try {
     const res = await fetch('/scrape', {
@@ -222,7 +798,7 @@ form.addEventListener('submit', async (e) => {
       body: JSON.stringify({ prompt, max_jobs: maxJobs }),
     });
     const data = await res.json();
-    if (data.error) { showError(data.error); reset(); return; }
+    if (data.error) { showError(data.error); finishReset(); return; }
 
     const runId = data.run_id;
     dlXlsx.href = `/download/${runId}/xlsx`;
@@ -231,38 +807,65 @@ form.addEventListener('submit', async (e) => {
 
     eventSource = new EventSource(`/stream/${runId}`);
     eventSource.onmessage = (event) => {
-      try {
-        const p = JSON.parse(event.data);
-        if (p.error) { showError(p.error); reset(); return; }
-        if (p.status === 'done' || p.collected >= p.target) {
-          progressFill.style.width = '100%';
-          progressText.textContent = `Done! ${p.collected || '?'} jobs collected.`;
-          progressDetail.textContent = '';
-          downloadLinks.hidden = false;
-          eventSource.close();
-          reset(false);
-          return;
-        }
-        const pct = p.target ? Math.round((p.collected / p.target) * 100) : 0;
-        progressFill.style.width = pct + '%';
-        progressText.textContent = `${p.collected || 0} / ${p.target || '?'} jobs found`;
-        progressDetail.textContent = p.current_query
-          ? `Searching: "${p.current_query}" in ${p.current_location || 'anywhere'}`
-          : '';
-      } catch (_) {}
+      let p;
+      try { p = JSON.parse(event.data); } catch (_) { return; }
+
+      if (p.error) {
+        showError(p.error);
+        progressSection.dataset.state = 'error';
+        progressText.textContent = 'Run failed';
+        finishReset(false);
+        return;
+      }
+
+      if (typeof p.collected === 'number') lastCollected = p.collected;
+
+      const isDone = p.status === 'done'
+        || (typeof p.collected === 'number' && typeof p.target === 'number' && p.collected >= p.target);
+
+      if (isDone) {
+        const n = (typeof p.collected === 'number') ? p.collected : lastCollected;
+        progressFill.style.width = '100%';
+        progressPct.textContent = '100%';
+        progressSection.dataset.state = 'done';
+        statCollected.textContent = String(n);
+        progressText.textContent = `Done — ${n} ${n === 1 ? 'job' : 'jobs'} collected`;
+        progressDetail.textContent = 'Pick a format below to download your results.';
+        downloadLinks.hidden = false;
+        if (eventSource) { eventSource.close(); eventSource = null; }
+        setBusy(false);
+        return;
+      }
+
+      const collected = p.collected || 0;
+      const target = p.target || maxJobs;
+      const pct = target ? Math.min(100, Math.round((collected / target) * 100)) : 0;
+      progressFill.style.width = pct + '%';
+      progressPct.textContent = pct + '%';
+      statCollected.textContent = String(collected);
+      statTarget.textContent = String(target);
+      if (typeof p.attempts === 'number') statPasses.textContent = String(p.attempts);
+      progressText.textContent = `${collected} of ${target} jobs found`;
+      progressDetail.textContent = p.current_query
+        ? `Searching “${p.current_query}” · ${p.current_location || 'anywhere'}`
+        : 'Scanning LinkedIn and scoring relevance…';
     };
-    eventSource.onerror = () => { showError('Connection lost. Check run status.'); reset(); };
+
+    eventSource.onerror = () => {
+      showError('Connection to the live progress stream was lost.');
+      progressSection.dataset.state = 'error';
+      finishReset(false);
+    };
   } catch (err) {
-    showError('Failed to start scrape: ' + err.message);
-    reset();
+    showError('Could not start the run: ' + err.message);
+    finishReset();
   }
 });
 
-function reset(clearProgress = true) {
-  submitBtn.disabled = false;
-  submitBtn.textContent = 'Start Scraping';
+function finishReset(hideProgress = true) {
+  setBusy(false);
   if (eventSource) { eventSource.close(); eventSource = null; }
-  if (clearProgress) progressSection.hidden = true;
+  if (hideProgress) { progressSection.hidden = true; progressSection.removeAttribute('data-state'); }
 }
 </script>
 </body>
