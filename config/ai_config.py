@@ -4,37 +4,56 @@ from config import LLM_PROVIDER, RELEVANCE_THRESHOLD
 # --- Prompt Templates ---
 
 PROMPT_PARSER_TEMPLATE = """
-You are a LinkedIn search expert. Convert the user's natural language prompt into a structured search plan.
-Return ONLY a JSON object.
+You are a senior LinkedIn recruiter. A non-expert user typed a short, casual job request.
+Your job is to understand what they REALLY mean and expand it into a precise search plan.
+
+Think about the role like a domain expert:
+- Infer the equivalent and adjacent job TITLES that recruiters actually post for this role.
+- Infer the core skills/technologies that define this role.
+- Keep everything tightly ON-TOPIC for the user's intent. Do NOT drift into unrelated roles.
+
+Examples of good expansion (titles only):
+- "software developer" -> ["software developer", "software engineer", "backend developer", "frontend developer", "full stack developer", "sde"]
+- "full stack developer" -> ["full stack developer", "full stack engineer", "mern stack developer", "java full stack developer", "python full stack developer"]
+- "finance jobs" -> ["financial analyst", "finance associate", "accountant", "finance manager", "investment analyst"]
+- "ui/ux" -> ["ui designer", "ux designer", "ui/ux designer", "product designer", "interaction designer"]
 
 User Prompt: "{prompt}"
 
-Required JSON structure:
+Return ONLY a JSON object (no markdown, no commentary) with EXACTLY these keys:
 {{
-    "role_keywords": ["list of specific job titles to search for"],
-    "sector": "the primary industry/sector",
-    "sector_keywords": ["synonyms for the sector, e.g., NGO, non-profit, charity"],
+    "role_keywords": ["4-8 concrete job-title search phrases, most specific first; these become LinkedIn searches"],
+    "sector": "the primary industry/sector in one or two words (e.g. technology, finance, design, healthcare, general)",
+    "sector_keywords": ["synonyms/related terms for the sector; [] if the prompt is purely about a role"],
     "experience_level": "junior | mid | senior | any",
-    "experience_keywords": ["phrases that indicate this level, e.g., '0-2 years', 'entry level'],",
-    "locations": ["list of cities or countries to search in"],
-    "exclude_keywords": ["terms that would disqualify a job, e.g., 'senior' for a junior role"],
+    "experience_keywords": ["phrases that signal this level, e.g. 'entry level', '0-2 years', 'senior'; [] if any"],
+    "skills": ["core skills/technologies that define this role"],
+    "locations": ["cities/countries the user named; if none given use [\\"India\\", \\"Remote\\"]"],
+    "exclude_keywords": ["titles/terms that would make a job clearly OFF-topic or wrong-level for this request"],
     "max_jobs": {max_jobs}
 }}
 """
 
 PROMPT_RELEVANCE_TEMPLATE = """
-You are an HR expert specializing in the {sector} sector. 
-Score the following LinkedIn job descriptions based on their relevance to the user's request: "{original_prompt}".
+You are a strict, expert technical recruiter. Decide how well each job matches what the user asked for.
 
-For each job, provide a relevance score from 0.0 to 1.0 and a brief reason.
+The user's request (their own words): "{original_prompt}"
+Primary sector: {sector}
 
-Jobs to evaluate:
+Judge each job by its TITLE and DESCRIPTION using real-world understanding of the role
+(equivalent titles, the skills/technologies it implies). Be strict:
+- 0.9-1.0 = clearly this exact role.
+- 0.7-0.89 = the same role family or a strong equivalent/adjacent title.
+- 0.4-0.69 = related but a notable mismatch in specialization or level.
+- 0.0-0.39 = different role, wrong level, or off-topic.
+Penalize jobs whose core function is a DIFFERENT profession from what the user wants.
+
+Jobs to evaluate (JSON):
 {jobs_batch}
 
-Return ONLY a JSON list of objects:
+Return ONLY a JSON list, one object per job, no markdown:
 [
-    {{ "job_id": "...", "score": 0.85, "reason": "Matches keywords X and Y" }},
-    ...
+    {{ "job_id": "...", "score": 0.85, "reason": "short reason grounded in the title/description" }}
 ]
 """
 
@@ -42,4 +61,4 @@ Return ONLY a JSON list of objects:
 AI_RELEVANCE_THRESHOLD = RELEVANCE_THRESHOLD
 AI_MIN_SCORE = 0.0
 AI_MAX_SCORE = 1.0
-AI_BATCH_SIZE = 10  # How many jobs to send in one relevance call
+AI_BATCH_SIZE = 20  # How many jobs to send in one relevance call (fewer round-trips)

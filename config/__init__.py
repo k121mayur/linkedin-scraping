@@ -23,6 +23,16 @@ LINKEDIN_PASSWORD = os.getenv("LINKEDIN_PASSWORD", "change-me-password")
 PLAYWRIGHT_HEADLESS = os.getenv("PLAYWRIGHT_HEADLESS", "true").lower() not in {"false", "0", "no"}
 MAX_DETAIL_CONCURRENCY = int(os.getenv("MAX_DETAIL_CONCURRENCY", "3"))
 
+# Canonical LinkedIn job URL base — the single source of truth for clickable links.
+LINKEDIN_JOB_VIEW_URL = os.getenv("LINKEDIN_JOB_VIEW_URL", "https://www.linkedin.com/jobs/view")
+
+# Pagination / scroll knobs for the authenticated jobs search.
+JOBS_PER_PAGE = int(os.getenv("JOBS_PER_PAGE", "25"))          # LinkedIn shows 25 cards/page
+MAX_SEARCH_PAGES = int(os.getenv("MAX_SEARCH_PAGES", "8"))      # cap pages per query (8*25=200 cards)
+SCROLL_PASSES = int(os.getenv("SCROLL_PASSES", "5"))          # scrolls to materialize a virtualized page
+PAGE_NAV_TIMEOUT = int(os.getenv("PAGE_NAV_TIMEOUT", "45000"))  # ms for page navigations
+FETCH_DETAILS = os.getenv("FETCH_DETAILS", "true").lower() not in {"false", "0", "no"}
+
 # --- AI / LLM Settings ---
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
@@ -30,9 +40,10 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://ollama.siliconmango.in")
 LLM_MODEL = os.getenv("LLM_MODEL", "gemma4:31b")
 
 # --- Relevance & Search Knobs ---
-RELEVANCE_THRESHOLD = float(os.getenv("RELEVANCE_THRESHOLD", "0.65"))
+RELEVANCE_THRESHOLD = float(os.getenv("RELEVANCE_THRESHOLD", "0.6"))
 MAX_JOBS_DEFAULT = int(os.getenv("MAX_JOBS_DEFAULT", "100"))
-DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
+# Real scraping is the default; set DRY_RUN=true explicitly to use mock data.
+DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
 # --- Gmail / verification handling ---
 GMAIL_USERNAME = os.getenv("GMAIL_USERNAME")
