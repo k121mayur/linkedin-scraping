@@ -65,7 +65,7 @@ Directory layout:
 ```
 app.py                  Flask routes + SSE; spawns each scrape in a daemon thread
 config/__init__.py      ALL env vars read once here (single source of truth)
-config/ai_config.py     LLM prompt templates + AI constants (AI_BATCH_SIZE=10)
+config/ai_config.py     LLM prompt templates + AI constants (AI_BATCH_SIZE=20)
 engine/
   prompt_parser.py      prompt → SearchPlan (LLM, _heuristic_parse fallback)
   search_strategy.py    builds primary + relaxed (broadening) SearchItem queues
@@ -105,10 +105,12 @@ HTTP endpoints (in `app.py`): `GET /`, `POST /scrape` (→ run_id), `GET /stream
 
 - **Generator-based orchestration**: `self_refinement.run()` is a generator that `yield`s `Progress` dataclasses (consumed by the Flask SSE stream) and `return`s the final job list. Calls `li_close()` at the end of each run to release the Playwright browser.
 - **Two-phase scoring**: relevance is scored on card data first (cheap, title/company only); `detail_pass` fetches full descriptions only for jobs that pass the threshold. Gated by `FETCH_DETAILS` env var.
-- **LLM + heuristic fallback pair**: `prompt_parser` and `relevance` each have an LLM path and a keyword/regex fallback (`_heuristic_parse`, `_keyword_score`) selected on `DRY_RUN` or LLM failure.
+- **LLM + heuristic fallback pair**: `prompt_parser` and `relevance` each have an LLM path and a keyword/regex fallback (`_heuristic_parse`, `_keyword_score`) selected on `DRY_RUN` or LLM failure. Relevance scoring judges on both title and description (not title/company only).
 - **Provider dispatch map**: `llm_client` selects `_call_openai`/`_call_ollama`/`_call_anthropic` from a dict keyed on `LLM_PROVIDER`.
-- **Conditional x-api-key**: Ollama calls only attach `x-api-key` when `_is_real_key(LLM_API_KEY)` returns true — the Silicon Mango endpoint is keyless by default.
-- **Robust JSON extraction**: `llm_client._extract_json()` strips markdown fences and scans for the first balanced `{...}` or `[...]` block before raising, tolerating model prose around JSON.
+- **Conditional x-api-key + browser UA**: Ollama calls only attach `x-api-key` when `_is_real_key(LLM_API_KEY)` returns true (Silicon Mango endpoint is keyless by default); all providers send a browser-like `_USER_AGENT` to avoid HTTP 403 from the reverse proxy.
+- **Transient-error retry**: `_urlopen_json()` retries up to 3 times with exponential backoff (`2*(attempt+1)s`) on status codes `{429, 500, 502, 503, 504, 520–524, 530}` (covers Cloudflare tunnel errors).
+- **Thinking disabled for gemma4**: `_call_ollama` sets `"think": False` in the request body to suppress gemma4's reasoning phase, avoiding ~90s latency per relevance/parse batch.
+- **Robust JSON extraction**: `llm_client._extract_json()` strips markdown fences and scans for the first balanced `{...}` or `[...]` block before raising, tolerating model prose around JSON. Ollama callers also receive an appended JSON-only system instruction (Ollama lacks `response_format`).
 - **Background-thread + queue + SSE**: `POST /scrape` returns immediately; work runs in a daemon thread pushing `Progress` onto a per-run `queue.Queue` drained by `GET /stream/<run_id>`.
 - **Thread-local SQLite** with WAL mode; dedup by unique `linkedin_job_id` via `seen_job_ids()`.
 - **Automated email-PIN login**: `linkedin_client` detects LinkedIn's email-verification challenge and delegates to `email_verifier.fetch_verification_code()` (Gmail IMAP) when `GMAIL_*` vars are configured.
