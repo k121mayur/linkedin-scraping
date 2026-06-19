@@ -1,4 +1,10 @@
-"""LinkedIn search client using Playwright with auth, throttle, and public fallback."""
+"""LinkedIn search client using Playwright with an authenticated session.
+
+Scraping strategy (kept deliberately): log into the LinkedIn account (reusing a
+saved session when possible) and scrape the authenticated jobs search. The job
+link for every card is built from its numeric job id (canonical
+``/jobs/view/<id>``) so exported links are always real and clickable.
+"""
 
 from __future__ import annotations
 
@@ -7,102 +13,313 @@ import time
 import re
 from config import (
     LINKEDIN_EMAIL, LINKEDIN_PASSWORD, PLAYWRIGHT_HEADLESS,
-    AUTH_FILE_PATH, DRY_RUN,
+    AUTH_FILE_PATH, DRY_RUN, LINKEDIN_JOB_VIEW_URL,
+    JOBS_PER_PAGE, MAX_SEARCH_PAGES, SCROLL_PASSES, PAGE_NAV_TIMEOUT,
 )
+from engine.email_verifier import fetch_verification_code, gmail_configured
 
 LINKEDIN_URL = "https://www.linkedin.com"
 LOGIN_URL = f"{LINKEDIN_URL}/login"
-JOBS_SEARCH_URL = "https://www.linkedin.com/jobs/search/"
+FEED_URL = f"{LINKEDIN_URL}/feed/"
+JOBS_SEARCH_URL = f"{LINKEDIN_URL}/jobs/search/"
 
-CARD_SELECTORS = [
-    ".job-search-card",
-    ".jobs-search-results__list-item",
-    ".job-card-container",
-]
-
-TITLE_SELECTORS = [
-    ".job-search-card__title",
-    ".job-card-list__title",
-    ".job-card-container__link",
-]
-
-COMPANY_SELECTORS = [
-    ".job-search-card__subtitle",
-    ".job-card-container__company-name",
-]
-
-LOCATION_SELECTORS = [
-    ".job-search-card__location",
-    ".job-card-container__metadata-item",
-]
-
+_pw = None
 _browser = None
+_context = None
 _page = None
 
 
+# ── Playwright lifecycle ─────────────────────────────────────
+
 def _init_playwright():
-    """Start Playwright sync API."""
     from playwright.sync_api import sync_playwright
     return sync_playwright().start()
 
 
-def _throttle():
-    time.sleep(random.uniform(2, 4))
+def _throttle(lo: float = 2.0, hi: float = 4.0):
+    time.sleep(random.uniform(lo, hi))
 
 
-def _try_selectors(page, selectors: list[str]):
+def _first_visible(page, selectors: list[str]):
+    """Return the first visible element matching any selector (login forms can
+    be duplicated in the DOM with a hidden copy)."""
     for sel in selectors:
-        el = page.query_selector(sel)
-        if el:
-            return el.inner_text().strip()
+        try:
+            loc = page.locator(sel)
+            for i in range(min(loc.count(), 5)):
+                item = loc.nth(i)
+                try:
+                    if item.is_visible():
+                        return item
+                except Exception:
+                    continue
+        except Exception:
+            continue
     return None
 
 
-def _try_selectors_all(page, selectors: list[str]):
-    for sel in selectors:
-        els = page.query_selector_all(sel)
-        if els:
-            return els
-    return []
-
-def _login():
-    """Log into LinkedIn using the already-initialized browser and persist auth state."""
-    global _page
-    # Browser must already be initialized by _ensure_auth()
-    assert _browser is not None, "_login called before browser init"
-    _page = _browser.new_page()
-
-    _page.goto(LOGIN_URL, wait_until="domcontentloaded")
-    _throttle()
-
-    _page.fill("#username", LINKEDIN_EMAIL)
-    _page.fill("#password", LINKEDIN_PASSWORD)
-    _page.click("button[type='submit']")
-    _throttle()
-
+def _fill_first(page, selectors: list[str], value: str):
+    """Fill the first visible matching input. Returns the locator filled, or None."""
+    el = _first_visible(page, selectors)
+    if el is None:
+        return None
     try:
-        _page.wait_for_url(f"{LINKEDIN_URL}/feed*", timeout=15000)
+        el.fill(value, timeout=8000)
+        return el
+    except Exception:
+        return None
+
+
+_EMAIL_SELECTORS = [
+    'input[autocomplete="username"]', '#username',
+    'input[name="session_key"]', 'input[type="email"]',
+]
+_PASSWORD_SELECTORS = [
+    'input[autocomplete="current-password"]', '#password',
+    'input[name="session_password"]', 'input[type="password"]',
+]
+
+
+_PIN_SELECTORS = [
+    'input[name="pin"]',
+    'input#input__email_verification_pin',
+    'input[autocomplete="one-time-code"]',
+    'input[placeholder*="code" i]',
+    'input[aria-label*="code" i]',
+    'input[id*="verification"]',
+    'input[id*="pin"]',
+]
+
+
+def _find_pin_input(page):
+    """Locate LinkedIn's email-verification PIN input, if the challenge is shown."""
+    for sel in _PIN_SELECTORS:
+        try:
+            el = page.query_selector(sel)
+            if el and el.is_visible():
+                return el
+        except Exception:
+            continue
+    # On a checkpoint/challenge page, fall back to the first visible text-like input.
+    try:
+        if "/checkpoint" in (page.url or "") or "/challenge" in (page.url or ""):
+            els = page.query_selector_all(
+                'input:not([type="hidden"]):not([type="checkbox"]):not([type="submit"])'
+                ':not([type="button"]):not([type="password"]):not([type="radio"])'
+            )
+            for el in els:
+                try:
+                    if el.is_visible():
+                        return el
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return None
+
+
+def _submit_pin(page, pin_el, code: str) -> None:
+    try:
+        pin_el.fill(code)
+    except Exception:
+        try:
+            pin_el.type(code, delay=40)
+        except Exception:
+            return
+    for sel in ("button#email-pin-submit-button", "button[type='submit']"):
+        try:
+            page.locator(sel).first.click(timeout=4000)
+            return
+        except Exception:
+            continue
+    for name in ("Submit", "Verify", "Continue", "Agree", "Done", "Next"):
+        try:
+            page.get_by_role("button", name=name).first.click(timeout=2500)
+            return
+        except Exception:
+            continue
+    try:
+        pin_el.press("Enter")
     except Exception:
         pass
 
-    _page.context.storage_state(path=str(AUTH_FILE_PATH))
+
+def _handle_email_challenge(page, after_epoch: float, used_codes: set[str]) -> bool:
+    """If an email-PIN challenge is shown, fetch the code from Gmail and submit it.
+
+    Returns True if a code was submitted this call, else False.
+    """
+    pin_el = _find_pin_input(page)
+    if pin_el is None:
+        return False
+    if not gmail_configured():
+        return False
+    code = fetch_verification_code(after_epoch=after_epoch, already_used=used_codes)
+    if not code:
+        return False
+    import sys
+    print(f"[linkedin_client] Auto-entering email verification code {code}",
+          file=sys.stderr, flush=True)
+    used_codes.add(code)
+    _submit_pin(page, pin_el, code)
+    return True
+
+
+def _is_logged_in(page) -> bool:
+    """Heuristic: are we on an authenticated LinkedIn page (not the auth wall)?"""
+    try:
+        url = page.url or ""
+    except Exception:
+        return False
+    if "/login" in url or "/authwall" in url or "/checkpoint" in url or "/uas/login" in url:
+        return False
+    for sel in (
+        "div.feed-identity-module",
+        "nav.global-nav",
+        "header#global-nav",
+        "input.search-global-typeahead__input",
+        "img.global-nav__me-photo",
+    ):
+        try:
+            if page.query_selector(sel):
+                return True
+        except Exception:
+            continue
+    # On a /feed or /jobs URL without the auth wall, assume authenticated.
+    return "/feed" in url or "/jobs" in url
+
+
+def _login():
+    """Log in with credentials, allowing time to solve any 2FA/captcha challenge.
+
+    When running headed (PLAYWRIGHT_HEADLESS=false), a challenge can be solved
+    manually within the wait window; the session is then persisted to
+    AUTH_FILE_PATH and reused on later runs.
+    """
+    global _page
+    assert _context is not None, "_login called before context init"
+    _page = _context.new_page()
+
+    _page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=PAGE_NAV_TIMEOUT)
+
+    # Wait for the (React-rendered) login form to mount before filling.
+    try:
+        _page.wait_for_selector(
+            'input[autocomplete="username"], #username, input[type="email"], input[name="session_key"]',
+            timeout=20000,
+        )
+    except Exception:
+        pass
+    _throttle(1.0, 2.0)
+
+    # LinkedIn's login markup varies (dedicated /login page, homepage variant,
+    # React build with dynamic ids). Target by stable attributes, trying each.
+    import sys
+    email_el = _fill_first(_page, _EMAIL_SELECTORS, LINKEDIN_EMAIL)
+    pwd_el = _fill_first(_page, _PASSWORD_SELECTORS, LINKEDIN_PASSWORD)
+
+    if email_el and pwd_el:
+        print("[linkedin_client] Credentials filled; submitting login.", file=sys.stderr, flush=True)
+        submitted = False
+        # Submitting via Enter on the filled password field avoids ambiguity with
+        # the SSO "Sign in with…" buttons.
+        try:
+            pwd_el.press("Enter")
+            submitted = True
+        except Exception:
+            pass
+        if not submitted:
+            btn = _first_visible(_page, ["button[type='submit']"])
+            if btn is None:
+                try:
+                    btn = _page.get_by_role("button", name="Sign in", exact=True).first
+                except Exception:
+                    btn = None
+            if btn is not None:
+                try:
+                    btn.click(timeout=4000)
+                except Exception as e:
+                    print(f"[linkedin_client] Could not click Sign in: {e}", file=sys.stderr, flush=True)
+    else:
+        print(
+            f"[linkedin_client] Login fields not found (email={bool(email_el)}, pwd={bool(pwd_el)}).",
+            file=sys.stderr, flush=True,
+        )
+
+    # Wait for an authenticated state, auto-clearing the email-PIN challenge via
+    # Gmail IMAP. Records when we submitted so we only accept a freshly-sent code.
+    submit_epoch = time.time()
+    used_codes: set[str] = set()
+    deadline = time.time() + 300
+    while time.time() < deadline:
+        if _is_logged_in(_page):
+            break
+        try:
+            if _handle_email_challenge(_page, submit_epoch, used_codes):
+                time.sleep(6)  # allow the checkpoint to process the code
+                continue
+        except Exception as e:
+            import sys
+            print(f"[linkedin_client] Email challenge handling error: {e}",
+                  file=sys.stderr, flush=True)
+        time.sleep(3)
+
+    if _is_logged_in(_page):
+        try:
+            _context.storage_state(path=str(AUTH_FILE_PATH))
+        except Exception:
+            pass
+    else:
+        import sys
+        try:
+            from config import DATA_DIR
+            shot = str(DATA_DIR / "login_failed.png")
+            _page.screenshot(path=shot)
+            print(f"[linkedin_client] Login not complete. Screenshot: {shot} | url={_page.url}",
+                  file=sys.stderr, flush=True)
+        except Exception:
+            pass
+        print(
+            "[linkedin_client] Login did not complete (challenge unsolved or bad "
+            "credentials). Run with PLAYWRIGHT_HEADLESS=false to solve it once.",
+            file=sys.stderr, flush=True,
+        )
 
 
 def _ensure_auth():
-    global _browser, _page
-    if _browser is not None:
+    """Start the browser and ensure we have an authenticated page."""
+    global _pw, _browser, _context, _page
+    if _page is not None and _is_logged_in(_page):
         return
 
-    pw = _init_playwright()
-    _browser = pw.chromium.launch(headless=PLAYWRIGHT_HEADLESS)
+    if _pw is None:
+        _pw = _init_playwright()
+    if _browser is None:
+        _browser = _pw.chromium.launch(headless=PLAYWRIGHT_HEADLESS)
 
     auth_exists = AUTH_FILE_PATH.exists() and AUTH_FILE_PATH.is_file()
-    if auth_exists:
-        ctx = _browser.new_context(storage_state=str(AUTH_FILE_PATH))
-        _page = ctx.new_page()
-    else:
-        _login()
-    assert _page is not None, "Failed to initialize page"
+    if auth_exists and _context is None:
+        # Try to reuse the saved session.
+        _context = _browser.new_context(storage_state=str(AUTH_FILE_PATH))
+        _page = _context.new_page()
+        try:
+            _page.goto(FEED_URL, wait_until="domcontentloaded", timeout=PAGE_NAV_TIMEOUT)
+            _throttle(1.5, 2.5)
+        except Exception:
+            pass
+        if _is_logged_in(_page):
+            return
+        # Saved session is stale — fall through to a fresh login.
+        try:
+            _context.close()
+        except Exception:
+            pass
+        _context = None
+        _page = None
+
+    if _context is None:
+        _context = _browser.new_context()
+    _login()
 
 
 def _page_safe():
@@ -110,7 +327,15 @@ def _page_safe():
     return _page
 
 
-def search(query: str, location: str = "") -> list[dict]:
+# ── Search ───────────────────────────────────────────────────
+
+def search(query: str, location: str = "", limit: int | None = None) -> list[dict]:
+    """Search LinkedIn jobs, paginating to gather unique cards.
+
+    Returns a list of card dicts; every card has a real canonical ``link``
+    (https://www.linkedin.com/jobs/view/<id>) derived from its numeric job id.
+    ``limit`` bounds how many unique cards to gather (stops paginating early).
+    """
     if DRY_RUN:
         return _mock_search(query, location)
 
@@ -120,124 +345,301 @@ def search(query: str, location: str = "") -> list[dict]:
         import sys
         print(f"[linkedin_client] Auth failed: {e}", file=sys.stderr, flush=True)
 
-    if _page is None:
+    if _page is None or not _is_logged_in(_page):
         return []
 
+    results: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for page_idx in range(MAX_SEARCH_PAGES):
+        start = page_idx * JOBS_PER_PAGE
+        url = _build_search_url(query, location, start)
+        try:
+            _page_safe().goto(url, wait_until="domcontentloaded", timeout=PAGE_NAV_TIMEOUT)
+        except Exception:
+            break
+
+        _throttle(1.2, 2.2)
+        if not _wait_for_cards(_page_safe()):
+            break  # no results on this page → query exhausted
+
+        _scroll_to_load(_page_safe())
+
+        page_cards = _extract_cards(_page_safe())
+        new_on_page = 0
+        for card in page_cards:
+            jid = card["job_id"]
+            if jid in seen_ids:
+                continue
+            seen_ids.add(jid)
+            results.append(card)
+            new_on_page += 1
+
+        # No fresh jobs surfaced on this page → we've reached the end.
+        if new_on_page == 0:
+            break
+
+        if limit and len(results) >= limit:
+            break
+
+    return results
+
+
+def _build_search_url(query: str, location: str, start: int) -> str:
     params = []
     if query:
         params.append(f"keywords={_url_quote(query)}")
     if location:
         params.append(f"location={_url_quote(location)}")
-    url = JOBS_SEARCH_URL + "?" + "&".join(params)
+    if start:
+        params.append(f"start={start}")
+    return JOBS_SEARCH_URL + "?" + "&".join(params)
 
+
+def _wait_for_cards(page) -> bool:
+    """Wait for at least one job-view anchor to appear. False if none/none found."""
     try:
-        _page_safe().goto(url, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_selector('a[href*="/jobs/view/"]', timeout=8000)
+        return True
     except Exception:
+        # Could be a genuinely empty result set — check the empty-state text.
         try:
-            _login()
-            _page_safe().goto(url, wait_until="domcontentloaded", timeout=30000)
+            body = (page.inner_text("body") or "").lower()
+            if "no matching jobs" in body or "no results found" in body:
+                return False
         except Exception:
-            return []
+            pass
+        return bool(page.query_selector('a[href*="/jobs/view/"]'))
 
-    _throttle()
 
-    for _ in range(3):
-        _page_safe().keyboard.press("End")
-        time.sleep(1)
-
-    cards = _try_selectors_all(_page_safe(), CARD_SELECTORS)
-    if not cards:
-        return []
-
-    results = []
-    for card in cards[:50]:
+def _scroll_to_load(page):
+    """Scroll the (virtualized) results list so all ~25 cards on the page render."""
+    for _ in range(SCROLL_PASSES):
         try:
-            link_el = card.query_selector("a")
-            link = (link_el.get_attribute("href") or "") if link_el else ""
-            job_id = _extract_job_id(link)
-
-            title = (_clean_text(card, TITLE_SELECTORS) or
-                     link_el.inner_text().strip() if link_el else "")
-
-            results.append({
-                "job_id": job_id,
-                "title": title,
-                "company": _clean_text(card, COMPANY_SELECTORS) or "",
-                "location": _clean_text(card, LOCATION_SELECTORS) or "",
-                "posted": "",
-                "link": link.split("?")[0] if link else "",
-                "snippet": "",
-            })
+            page.evaluate(
+                """() => {
+                    const anchors = document.querySelectorAll('a[href*="/jobs/view/"]');
+                    if (anchors.length) {
+                        anchors[anchors.length - 1].scrollIntoView({block: 'center'});
+                    }
+                    const list = document.querySelector(
+                        '.jobs-search-results-list, .scaffold-layout__list, ul.jobs-search__results-list'
+                    );
+                    if (list) { list.scrollTop = list.scrollHeight; }
+                }"""
+            )
         except Exception:
+            pass
+        time.sleep(0.6)
+
+
+def _extract_cards(page) -> list[dict]:
+    """Extract job cards from the DOM, keyed off stable /jobs/view/<id> anchors."""
+    try:
+        raw = page.evaluate(
+            """() => {
+                const seen = {};
+                const out = [];
+                const anchors = document.querySelectorAll('a[href*="/jobs/view/"]');
+                anchors.forEach(a => {
+                    const href = a.getAttribute('href') || '';
+                    const m = href.match(/\\/jobs\\/view\\/(\\d+)/);
+                    if (!m) return;
+                    const id = m[1];
+                    if (seen[id]) return;
+                    seen[id] = true;
+                    const card = a.closest('li, div.job-card-container, div.base-card') || a.parentElement;
+                    let title = (a.getAttribute('aria-label') || a.innerText || '').trim();
+                    const firstLine = title.split('\\n').map(s => s.trim()).filter(Boolean)[0];
+                    if (firstLine) title = firstLine;
+                    let company = '', location = '';
+                    if (card) {
+                        const c = card.querySelector(
+                            '.artdeco-entity-lockup__subtitle, .job-card-container__primary-description, ' +
+                            '.job-card-container__company-name, .base-search-card__subtitle'
+                        );
+                        if (c) company = c.innerText.trim();
+                        const l = card.querySelector(
+                            '.job-card-container__metadata-item, .artdeco-entity-lockup__caption, ' +
+                            '.job-search-card__location'
+                        );
+                        if (l) location = l.innerText.trim();
+                    }
+                    out.push({job_id: id, title: title, company: company, location: location});
+                });
+                return out;
+            }"""
+        ) or []
+    except Exception:
+        raw = []
+
+    cards = []
+    for item in raw:
+        jid = str(item.get("job_id", "")).strip()
+        if not jid.isdigit():
             continue
+        cards.append({
+            "job_id": jid,
+            "title": (item.get("title") or "").strip(),
+            "company": (item.get("company") or "").strip(),
+            "location": (item.get("location") or "").strip(),
+            "posted": "",
+            "link": canonical_view_url(jid),
+            "snippet": "",
+        })
+    return cards
 
-    return results
 
+# ── Detail ───────────────────────────────────────────────────
 
-def get_job_detail(job_url: str) -> dict | None:
+def get_job_detail(job_url_or_id: str) -> dict:
+    """Fetch a job's full detail. Always returns a dict with a valid apply_url.
+
+    Never returns None: on any failure it still returns the canonical link so the
+    job is never dropped or left without a usable URL.
+    """
+    job_id = _extract_job_id(job_url_or_id)
+    canonical = canonical_view_url(job_id) if job_id else (job_url_or_id or "")
+
     if DRY_RUN:
         return {
-            "description": f"Mock description for {job_url}",
-            "apply_url": job_url,
+            "description": f"Mock description for {canonical}",
+            "apply_url": canonical,
             "posted_date": "2 days ago",
             "company_url": "",
         }
 
+    fallback = {"description": "", "apply_url": canonical, "posted_date": "", "company_url": ""}
+    if _page is None:
+        return fallback
+
     try:
         page = _page_safe()
-        page.goto(job_url, wait_until="domcontentloaded", timeout=20000)
-        _throttle()
+        page.goto(canonical, wait_until="domcontentloaded", timeout=PAGE_NAV_TIMEOUT)
+        _throttle(0.5, 1.0)
 
+        # Expand the description if a "Show more" toggle exists (short timeout —
+        # the current layout shows the full text without it).
         try:
-            page.click("button:has-text('Show more')", timeout=3000)
-            _throttle()
+            page.click("button:has-text('Show more')", timeout=800)
         except Exception:
             pass
 
-        desc_el = page.query_selector(".jobs-description__content, .description__text, #job-details")
-        description = desc_el.inner_text() if desc_el else ""
+        description = _extract_description(page)
+        if not description:
+            time.sleep(1.0)
+            description = _extract_description(page)
 
-        apply_el = page.query_selector("a[href*='linkedin.com/comm/jobs']")
-        apply_url = apply_el.get_attribute("href") if apply_el else job_url
+        posted_date = ""
+        for sel in (
+            ".jobs-unified-top-card__posted-date",
+            ".posted-time-ago__text",
+            ".jobs-unified-top-card__subtitle-secondary-grouping span",
+        ):
+            el = page.query_selector(sel)
+            if el:
+                posted_date = (el.inner_text() or "").strip()
+                if posted_date:
+                    break
 
-        posted_el = page.query_selector(".jobs-unified-top-card__posted-date, .posted-time-ago__text")
-        posted_date = posted_el.inner_text().strip() if posted_el else ""
-
-        company_link = page.query_selector(".jobs-unified-top-card__company-name a")
-        company_url = company_link.get_attribute("href") if company_link else ""
+        company_url = ""
+        link_el = page.query_selector(
+            ".job-details-jobs-unified-top-card__company-name a, "
+            ".jobs-unified-top-card__company-name a"
+        )
+        if link_el:
+            company_url = link_el.get_attribute("href") or ""
 
         return {
             "description": description,
-            "apply_url": apply_url,
+            "apply_url": canonical,
             "posted_date": posted_date,
             "company_url": company_url,
         }
     except Exception:
-        return None
+        return fallback
 
 
 def close():
-    global _browser, _page
-    if _browser:
+    global _pw, _browser, _context, _page
+    for closer in (
+        lambda: _context.close() if _context else None,
+        lambda: _browser.close() if _browser else None,
+        lambda: _pw.stop() if _pw else None,
+    ):
         try:
-            _browser.close()
+            closer()
         except Exception:
             pass
-        _browser = None
-        _page = None
+    _pw = _browser = _context = _page = None
 
 
-def _clean_text(card, selectors: list[str]) -> str:
-    for sel in selectors:
-        el = card.query_selector(sel)
-        if el:
-            return el.inner_text().strip()
+# ── Helpers ──────────────────────────────────────────────────
+
+def canonical_view_url(job_id: str) -> str:
+    """The single source of truth for a job's clickable link."""
+    return f"{LINKEDIN_JOB_VIEW_URL.rstrip('/')}/{job_id}"
+
+
+_DESC_END_MARKERS = (
+    "similar jobs", "people also viewed", "set alert", "jobs you may be interested",
+    "more jobs at", "see more jobs", "show more jobs", "report this job",
+    "people you can reach", "salary insights",
+)
+
+
+def _trim_desc(text: str) -> str:
+    """Trim trailing page boilerplate that follows the job description."""
+    low = text.lower()
+    cut = len(text)
+    for m in _DESC_END_MARKERS:
+        j = low.find(m)
+        if 50 < j < cut:
+            cut = j
+    return text[:cut].strip()[:8000]
+
+
+def _extract_description(page) -> str:
+    """Pull the job description text.
+
+    The current LinkedIn job page uses hashed class names, so we anchor on the
+    stable "About the job" section heading in the page text. Older layouts with
+    stable selectors are tried first.
+    """
+    for sel in (
+        "#job-details",
+        ".jobs-description__content",
+        ".jobs-box__html-content",
+        ".show-more-less-html__markup",
+        ".description__text",
+    ):
+        try:
+            el = page.query_selector(sel)
+            if el:
+                t = (el.inner_text() or "").strip()
+                if len(t) > 40:
+                    return _trim_desc(t)
+        except Exception:
+            continue
+    try:
+        body = page.inner_text("body") or ""
+    except Exception:
+        return ""
+    idx = body.lower().find("about the job")
+    if idx >= 0:
+        return _trim_desc(body[idx:])
     return ""
 
 
-def _extract_job_id(url: str) -> str:
-    m = re.search(r"/view/(\d+)", url)
-    return m.group(1) if m else url
+def _extract_job_id(url_or_id: str) -> str:
+    s = str(url_or_id or "")
+    if s.isdigit():
+        return s
+    m = re.search(r"/jobs/view/(\d+)", s)
+    if m:
+        return m.group(1)
+    m = re.search(r"(\d{6,})", s)
+    return m.group(1) if m else ""
 
 
 def _url_quote(s: str) -> str:
@@ -246,14 +648,15 @@ def _url_quote(s: str) -> str:
 
 
 def _mock_search(query: str, location: str) -> list[dict]:
+    base = query.split()[0].title() if query.split() else "Job"
     return [
         {
             "job_id": f"mock_{i}",
-            "title": f"{query.split()[0].title()} Position {i}",
+            "title": f"{base} Position {i}",
             "company": "Mock NGO Corp",
             "location": location or "India",
             "posted": "1 week ago",
-            "link": f"https://linkedin.com/jobs/view/mock_{i}",
+            "link": f"{LINKEDIN_JOB_VIEW_URL.rstrip('/')}/mock_{i}",
             "snippet": f"This is a mock job for {query}",
         }
         for i in range(1, 6)
