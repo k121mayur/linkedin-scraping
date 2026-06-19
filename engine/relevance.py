@@ -9,42 +9,75 @@ from config.ai_config import PROMPT_RELEVANCE_TEMPLATE, AI_BATCH_SIZE
 from engine.llm_client import chat_json
 
 
+def _contains(kw: str, hay: str) -> bool:
+    """True if the phrase, or all of its significant words, appear in hay."""
+    kw = kw.lower().strip()
+    if not kw:
+        return False
+    if kw in hay:
+        return True
+    words = [w for w in kw.split() if len(w) > 2]
+    return bool(words) and all(w in hay for w in words)
+
+
+def _any_contains(kws: list[str], hay: str) -> bool:
+    return any(_contains(kw, hay) for kw in kws)
+
+
+def _fraction_present(kws: list[str], hay: str) -> float:
+    if not kws:
+        return 0.0
+    hits = sum(1 for kw in kws if _contains(kw, hay))
+    return hits / len(kws)
+
+
 def _keyword_score(job: dict, plan: dict) -> float:
-    """Fallback keyword-match relevance score. Weighted: role=50%, sector=30%, exp=20%."""
-    text = " ".join(str(v).lower() for v in job.values() if isinstance(v, str))
-    if not text:
+    """Graded keyword relevance in [0,1], aligned with the LLM's scale.
+
+    Role match in the TITLE is the strongest signal; sector/skills add weight;
+    excluded terms (wrong role/level) push the score down hard. This is the
+    dependable fallback used whenever the LLM is unavailable.
+    """
+    title = str(job.get("title", "")).lower()
+    body = " ".join(
+        str(job.get(k, "")) for k in ("description", "snippet", "company", "location")
+    ).lower()
+    full = (title + " " + body).strip()
+    if not full:
         return 0.0
 
-    def _match_any(kws: list[str]) -> bool:
-        for kw in kws:
-            kw_lower = kw.lower()
-            if kw_lower in text:
-                return True
-            parts = [w for w in kw_lower.split() if len(w) > 2]
-            if parts and any(p in text for p in parts):
-                return True
-        return False
-
-    score = 0.0
     role_kws = plan.get("role_keywords", [])
     sector_kws = plan.get("sector_keywords", [])
+    skill_kws = plan.get("skills", [])
     exp_kws = plan.get("experience_keywords", [])
     exclude_kws = plan.get("exclude_keywords", [])
 
-    if role_kws and _match_any(role_kws):
-        score += 0.50
-    if sector_kws and _match_any(sector_kws):
-        score += 0.30
-    if exp_kws and _match_any(exp_kws):
-        score += 0.20
-    # If no categories matched, give a base score for any keyword hit
-    if score == 0.0 and (_match_any(role_kws) or _match_any(sector_kws + exp_kws)):
-        score = 0.30
+    # Role is the dominant signal.
+    if role_kws and _any_contains(role_kws, title):
+        score = 0.75
+    elif role_kws and _any_contains(role_kws, body):
+        score = 0.55
+    else:
+        # Partial credit for significant-word overlap with any role phrase.
+        best = 0.0
+        for kw in role_kws:
+            words = [w for w in kw.lower().split() if len(w) > 2]
+            if words:
+                best = max(best, sum(1 for w in words if w in full) / len(words))
+        score = 0.35 * best
 
-    # Penalize exclude keywords
+    # Supporting signals.
+    score += 0.10 if (sector_kws and _any_contains(sector_kws, full)) else 0.0
+    score += 0.12 * _fraction_present(skill_kws, full)
+    if exp_kws and _any_contains(exp_kws, full):
+        score += 0.08
+
+    # Hard penalties for clearly-disqualifying terms (strongest in the title).
     for kw in exclude_kws:
-        if kw.lower() in text:
-            score -= 0.30
+        if _contains(kw, title):
+            score -= 0.5
+        elif _contains(kw, body):
+            score -= 0.2
 
     return max(0.0, min(1.0, score))
 
