@@ -56,7 +56,7 @@ prompt → prompt_parser.parse() → SearchPlan dict
        → self_refinement.run() drives the loop:
             linkedin_client.search()      → job cards
             relevance.filter_relevant()   → cards scored on title/company (cheap, no page nav)
-            job_extractor.detail_pass()   → relevant cards enriched with full descriptions
+            linkedin_client.get_job_detail() → per-job inline enrichment (full description)
             database.upsert_job()          → SQLite persistence + dedup by linkedin_job_id
        → exporter.export_*()              → xlsx / csv / json
 ```
@@ -103,8 +103,8 @@ HTTP endpoints (in `app.py`): `GET /`, `POST /scrape` (→ run_id), `GET /stream
 <!-- AUTO-MANAGED: patterns -->
 ## Detected Patterns
 
-- **Generator-based orchestration**: `self_refinement.run()` is a generator that `yield`s `Progress` dataclasses (consumed by the Flask SSE stream) and `return`s the final job list. Calls `li_close()` at the end of each run to release the Playwright browser.
-- **Two-phase scoring**: relevance is scored on card data first (cheap, title/company only); `detail_pass` fetches full descriptions only for jobs that pass the threshold. Gated by `FETCH_DETAILS` env var.
+- **Generator-based orchestration**: `self_refinement.run()` is a generator that `yield`s `Progress` dataclasses (consumed by the Flask SSE stream) and `return`s the final job list. Yields once at the start of each attempt (to refresh the "Searching: …" line) and once per collected job (so the UI counter increments 1, 2, 3, … not in batch jumps). Calls `li_close()` at the end of each run to release the Playwright browser.
+- **Two-phase scoring**: relevance is scored on card data first (cheap, title/company only); `linkedin_client.get_job_detail()` fetches the full description inline for each job that passes the threshold, one at a time. Gated by `FETCH_DETAILS` env var. (`job_extractor.detail_pass` is no longer called by the active pipeline.)
 - **LLM + heuristic fallback pair**: `prompt_parser` and `relevance` each have an LLM path and a keyword/regex fallback (`_heuristic_parse`, `_keyword_score`) selected on `DRY_RUN` or LLM failure. Relevance scoring judges on both title and description (not title/company only).
 - **Provider dispatch map**: `llm_client` selects `_call_openai`/`_call_ollama`/`_call_anthropic` from a dict keyed on `LLM_PROVIDER`.
 - **Conditional x-api-key + browser UA**: Ollama calls only attach `x-api-key` when `_is_real_key(LLM_API_KEY)` returns true (Silicon Mango endpoint is keyless by default); all providers send a browser-like `_USER_AGENT` to avoid HTTP 403 from the reverse proxy.
