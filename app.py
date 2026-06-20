@@ -83,23 +83,37 @@ def stream(run_id: int):
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+def _download_stem(run_id: int) -> str:
+    """Return a filesystem-safe name derived from the run's prompt, e.g. 'full_stack_developer'."""
+    import re
+    run = get_run(run_id)
+    if run and run.get("prompt"):
+        slug = run["prompt"].strip().lower()
+        slug = re.sub(r"[^a-z0-9]+", "_", slug)   # non-alphanum → underscore
+        slug = slug.strip("_")[:60]                 # trim and cap length
+        if slug:
+            return slug
+    return f"run_{run_id}"
+
+
 @app.route("/download/<int:run_id>/<fmt>")
 def download(run_id: int, fmt: str):
+    stem = _download_stem(run_id)
     if fmt == "json":
         data = export_json(run_id)
         return Response(data, mimetype="application/json",
-                        headers={"Content-Disposition": f"attachment; filename=run_{run_id}.json"})
+                        headers={"Content-Disposition": f"attachment; filename={stem}.json"})
     elif fmt == "csv":
         data = export_csv(run_id)
         return Response(data, mimetype="text/csv",
-                        headers={"Content-Disposition": f"attachment; filename=run_{run_id}.csv"})
+                        headers={"Content-Disposition": f"attachment; filename={stem}.csv"})
     elif fmt == "xlsx":
         data = export_xlsx_bytes(run_id)
         return send_file(
             __import__("io").BytesIO(data),
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             as_attachment=True,
-            download_name=f"run_{run_id}.xlsx",
+            download_name=f"{stem}.xlsx",
         )
     return jsonify({"error": f"unknown format: {fmt}"}), 400
 
