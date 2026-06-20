@@ -85,7 +85,7 @@ _archive/               superseded standalone scripts — reference only, NOT li
 Key files to read first: `app.py` → `engine/self_refinement.py` → `config/__init__.py`.
 
 HTTP endpoints (in `app.py`): `GET /`, `POST /scrape` (→ run_id), `GET /stream/<run_id>` (SSE),
-`GET /download/<run_id>/<fmt>`, `GET /runs/<run_id>`, `GET /health`.
+`GET /download/<run_id>/<fmt>` (filename derived from prompt slug via `_download_stem()`), `GET /runs/<run_id>`, `GET /health`.
 
 <!-- END AUTO-MANAGED -->
 
@@ -118,6 +118,7 @@ HTTP endpoints (in `app.py`): `GET /`, `POST /scrape` (→ run_id), `GET /stream
 - **Paginated card extraction**: `search()` loops up to `MAX_SEARCH_PAGES`, calling `_wait_for_cards()` → `_scroll_to_load()` → `_extract_cards()` (DOM evaluation keyed on `/jobs/view/<id>` anchors). Stops early when no new cards appear.
 - **Canonical job links**: `canonical_view_url(job_id)` is the single source of truth for clickable job URLs, using the `LINKEDIN_JOB_VIEW_URL` config knob.
 - **Progressive broadening via `SearchItem.action`**: each item in the search queue carries an `action` tag (`seed` | `broaden_query` | `widen_location` | `relax_filters`); `build_relaxed_queue(plan, attempts)` escalates strategies across attempt thresholds (0-3, 0-6, 0-9, then broad single-word).
+- **Prompt-derived download filenames**: `_download_stem(run_id)` in `app.py` slugifies the run's prompt (lowercase, non-alphanumeric → `_`, capped at 60 chars) for `Content-Disposition` filenames on `GET /download/<run_id>/<fmt>`; falls back to `run_{run_id}` when no prompt is stored.
 
 <!-- END AUTO-MANAGED -->
 
