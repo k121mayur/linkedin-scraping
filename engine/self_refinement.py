@@ -6,8 +6,7 @@ import dataclasses
 from config import FETCH_DETAILS, JOBS_PER_PAGE
 from engine import database as db
 from engine.search_strategy import build_queue, build_relaxed_queue
-from engine.linkedin_client import search as li_search, close as li_close
-from engine.job_extractor import detail_pass
+from engine.linkedin_client import search as li_search, close as li_close, get_job_detail
 from engine.relevance import filter_relevant
 
 
@@ -58,6 +57,12 @@ def run(prompt: str, parsed_plan: dict, max_jobs: int, run_id=None):
         db.log_attempt(run_id, item.query, item.location, action=item.action)
         need = max_jobs - len(collected)
 
+        # Refresh the live "Searching: …" line (keeps the current count).
+        yield Progress(
+            run_id=run_id, collected=len(collected), target=max_jobs,
+            attempts=attempts, current_query=item.query, current_location=item.location,
+        )
+
         # Search (paginated, bounded so we don't over-scrape for a small target).
         try:
             cards = li_search(item.query, item.location, limit=max(need * 2, JOBS_PER_PAGE))
@@ -90,42 +95,40 @@ def run(prompt: str, parsed_plan: dict, max_jobs: int, run_id=None):
         relevant.sort(key=lambda j: j.get("relevance_score", 0), reverse=True)
         to_take = relevant[:need]
 
-        # Enrich only the jobs we'll keep — adds the full description and a
-        # guaranteed canonical apply_url.
-        if FETCH_DETAILS and to_take:
-            enriched = detail_pass(to_take, limit=len(to_take), seen_ids=seen)
-        else:
-            enriched = []
-            for c in to_take:
-                c.setdefault("linkedin_job_id", c.get("job_id", ""))
-                c.setdefault("apply_url", c.get("link", ""))
-                enriched.append(c)
-
-        for job in enriched:
-            jid = job.get("linkedin_job_id") or job.get("job_id")
+        # Collect ONE job at a time: enrich it with full detail, persist, and
+        # emit a Progress so the UI ticks up incrementally (1, 2, 3, …) rather
+        # than jumping by the whole batch at once.
+        for card in to_take:
+            jid = card.get("job_id") or card.get("linkedin_job_id", "")
             if not jid or jid in seen:
                 continue
-            job["linkedin_job_id"] = jid
+
+            if FETCH_DETAILS:
+                detail = get_job_detail(card.get("link", "")) or {}
+                job = {**card, **detail, "linkedin_job_id": jid}
+            else:
+                job = {**card, "linkedin_job_id": jid}
             if not job.get("apply_url"):
-                job["apply_url"] = job.get("link", "")
+                job["apply_url"] = card.get("link", "")
+
             db.upsert_job(job, run_id, prompt)
             collected.append(job)
             seen.add(jid)
+
+            yield Progress(
+                run_id=run_id,
+                collected=len(collected),
+                target=max_jobs,
+                attempts=attempts,
+                current_query=item.query,
+                current_location=item.location,
+            )
             if len(collected) >= max_jobs:
                 break
 
         db.log_attempt(
             run_id, item.query, item.location,
             action=item.action, cards=len(cards), relevant=len(relevant),
-        )
-
-        yield Progress(
-            run_id=run_id,
-            collected=len(collected),
-            target=max_jobs,
-            attempts=attempts,
-            current_query=item.query,
-            current_location=item.location,
         )
 
     # Finalize
