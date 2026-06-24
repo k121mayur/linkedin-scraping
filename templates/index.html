@@ -441,6 +441,29 @@
       font-size: 0.82rem;
       color: var(--text-faint);
     }
+    .progress__head-right { display: flex; align-items: center; gap: 0.75rem; }
+    .stop-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.4rem 0.95rem;
+      border-radius: 999px;
+      border: 1px solid var(--danger);
+      background: #FDECEC;
+      color: var(--danger);
+      font-family: var(--font-display);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 150ms, transform 120ms, filter 140ms;
+    }
+    .stop-btn svg { width: 13px; height: 13px; }
+    .stop-btn:hover { background: #FBDADA; transform: translateY(-1px); }
+    .stop-btn:active { transform: translateY(0) scale(0.97); }
+    .stop-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(214, 69, 69, 0.25); }
+    .stop-btn:disabled { cursor: progress; filter: saturate(0.6) opacity(0.7); transform: none; }
+    .progress[data-state="stopped"] .progress__status { color: var(--danger); }
+    .progress[data-state="stopped"] .bar__fill { background: linear-gradient(90deg, var(--accent), var(--danger)); }
 
     .stats {
       display: grid;
@@ -656,7 +679,13 @@
             <div id="progress" class="progress" hidden aria-live="polite">
               <div class="progress__head">
                 <span class="progress__status" id="progress-text">Initializing…</span>
-                <span class="progress__pct" id="progress-pct">0%</span>
+                <div class="progress__head-right">
+                  <span class="progress__pct" id="progress-pct">0%</span>
+                  <button type="button" id="stop-btn" class="stop-btn" hidden aria-label="Stop the run and keep collected jobs">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                    <span id="stop-label">Stop</span>
+                  </button>
+                </div>
               </div>
               <div class="stats">
                 <div class="stat stat--collected">
@@ -727,9 +756,12 @@ const downloadLinks = $('download-links');
 const dlXlsx = $('dl-xlsx');
 const dlCsv = $('dl-csv');
 const dlJson = $('dl-json');
+const stopBtn = $('stop-btn');
+const stopLabel = $('stop-label');
 
 let eventSource = null;
 let lastCollected = 0;
+let currentRunId = null;
 
 function showError(msg) { errorText.textContent = msg; errorBox.hidden = false; }
 function hideError() { errorBox.hidden = true; }
@@ -769,6 +801,10 @@ form.addEventListener('submit', async (e) => {
   progressSection.hidden = false;
   progressSection.dataset.state = 'running';
   downloadLinks.hidden = true;
+  stopBtn.hidden = true;
+  stopBtn.disabled = false;
+  stopLabel.textContent = 'Stop';
+  currentRunId = null;
   lastCollected = 0;
   progressFill.style.width = '0%';
   progressPct.textContent = '0%';
@@ -789,9 +825,11 @@ form.addEventListener('submit', async (e) => {
     if (data.error) { showError(data.error); finishReset(); return; }
 
     const runId = data.run_id;
+    currentRunId = runId;
     dlXlsx.href = `/download/${runId}/xlsx`;
     dlCsv.href = `/download/${runId}/csv`;
     dlJson.href = `/download/${runId}/json`;
+    stopBtn.hidden = false;
 
     eventSource = new EventSource(`/stream/${runId}`);
     eventSource.onmessage = (event) => {
@@ -808,6 +846,20 @@ form.addEventListener('submit', async (e) => {
 
       if (typeof p.collected === 'number') lastCollected = p.collected;
 
+      // User-requested stop: keep whatever was collected and offer downloads.
+      if (p.status === 'stopped') {
+        const n = (typeof p.collected === 'number') ? p.collected : lastCollected;
+        progressSection.dataset.state = 'stopped';
+        statCollected.textContent = String(n);
+        progressText.textContent = `Stopped — ${n} ${n === 1 ? 'job' : 'jobs'} saved`;
+        progressDetail.textContent = 'Pick a format below to download what was collected.';
+        downloadLinks.hidden = false;
+        stopBtn.hidden = true;
+        if (eventSource) { eventSource.close(); eventSource = null; }
+        setBusy(false);
+        return;
+      }
+
       const isDone = p.status === 'done'
         || (typeof p.collected === 'number' && typeof p.target === 'number' && p.collected >= p.target);
 
@@ -820,6 +872,7 @@ form.addEventListener('submit', async (e) => {
         progressText.textContent = `Done — ${n} ${n === 1 ? 'job' : 'jobs'} collected`;
         progressDetail.textContent = 'Pick a format below to download your results.';
         downloadLinks.hidden = false;
+        stopBtn.hidden = true;
         if (eventSource) { eventSource.close(); eventSource = null; }
         setBusy(false);
         return;
@@ -852,9 +905,23 @@ form.addEventListener('submit', async (e) => {
 
 function finishReset(hideProgress = true) {
   setBusy(false);
+  stopBtn.hidden = true;
   if (eventSource) { eventSource.close(); eventSource = null; }
   if (hideProgress) { progressSection.hidden = true; progressSection.removeAttribute('data-state'); }
 }
+
+// Stop button: ask the server to halt the run; collected jobs stay downloadable.
+stopBtn.addEventListener('click', async () => {
+  if (!currentRunId) return;
+  stopBtn.disabled = true;
+  stopLabel.textContent = 'Stopping…';
+  progressDetail.textContent = 'Stopping — saving the jobs collected so far…';
+  try {
+    await fetch(`/stop/${currentRunId}`, { method: 'POST' });
+  } catch (_) {
+    // Even if this request fails, the run will end and the stream resolves the UI.
+  }
+});
 </script>
 </body>
 </html>
