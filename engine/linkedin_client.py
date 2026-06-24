@@ -295,7 +295,14 @@ def _ensure_auth():
     if _pw is None:
         _pw = _init_playwright()
     if _browser is None:
-        _browser = _pw.chromium.launch(headless=PLAYWRIGHT_HEADLESS)
+        # Server-safe Chromium flags: --no-sandbox is required when running as
+        # root (Docker/CI), --disable-dev-shm-usage avoids /dev/shm exhaustion on
+        # small servers, --disable-gpu keeps headless Chromium stable without a
+        # GPU. These are no-ops on a desktop run, so they're always applied.
+        _browser = _pw.chromium.launch(
+            headless=PLAYWRIGHT_HEADLESS,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        )
 
     auth_exists = AUTH_FILE_PATH.exists() and AUTH_FILE_PATH.is_file()
     if auth_exists and _context is None:
@@ -506,7 +513,7 @@ def get_job_detail(job_url_or_id: str) -> dict:
             "description": f"Mock description for {canonical}",
             "apply_url": canonical,
             "posted_date": "2 days ago",
-            "company_url": "",
+            "company_url": "https://www.linkedin.com/company/mock-ngo-corp",
         }
 
     fallback = {"description": "", "apply_url": canonical, "posted_date": "", "company_url": ""}
@@ -542,13 +549,7 @@ def get_job_detail(job_url_or_id: str) -> dict:
                 if posted_date:
                     break
 
-        company_url = ""
-        link_el = page.query_selector(
-            ".job-details-jobs-unified-top-card__company-name a, "
-            ".jobs-unified-top-card__company-name a"
-        )
-        if link_el:
-            company_url = link_el.get_attribute("href") or ""
+        company_url = _extract_company_url(page)
 
         return {
             "description": description,
@@ -558,6 +559,52 @@ def get_job_detail(job_url_or_id: str) -> dict:
         }
     except Exception:
         return fallback
+
+
+def _extract_company_url(page) -> str:
+    """Resolve the hiring company's LinkedIn page URL from the job detail page.
+
+    LinkedIn's job page uses hashed/versioned class names, so anchoring on a
+    fixed ``.jobs-unified-top-card__company-name a`` selector silently breaks
+    (this was leaving company_url empty in exports). Instead we scan the top-card
+    region for the first stable ``/company/<slug>`` anchor, then fall back to any
+    such anchor on the page. Tracking query params are stripped.
+    """
+    try:
+        href = page.evaluate(
+            """() => {
+                const clean = (h) => {
+                    if (!h) return '';
+                    try {
+                        const u = new URL(h, 'https://www.linkedin.com');
+                        // canonical company URL: keep only the /company/<slug> path
+                        const m = u.pathname.match(/\\/company\\/[^\\/?#]+/);
+                        return m ? 'https://www.linkedin.com' + m[0] : '';
+                    } catch (e) { return ''; }
+                };
+                // Prefer an anchor inside the top card (the hiring company link).
+                const scopes = [
+                    '.job-details-jobs-unified-top-card__company-name',
+                    '.jobs-unified-top-card__company-name',
+                    '.job-details-jobs-unified-top-card__primary-description-container',
+                    '.jobs-unified-top-card',
+                    '.job-details-jobs-unified-top-card__container--two-pane',
+                ];
+                for (const s of scopes) {
+                    const scope = document.querySelector(s);
+                    if (!scope) continue;
+                    const a = scope.querySelector('a[href*="/company/"]');
+                    if (a) { const c = clean(a.getAttribute('href')); if (c) return c; }
+                }
+                // Fall back to the first /company/ anchor anywhere on the page.
+                const any = document.querySelector('a[href*="/company/"]');
+                if (any) { const c = clean(any.getAttribute('href')); if (c) return c; }
+                return '';
+            }"""
+        )
+        return (href or "").strip()
+    except Exception:
+        return ""
 
 
 def close():
