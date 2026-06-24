@@ -16,21 +16,27 @@ app = Flask(__name__)
 
 # Active scraper progress queues: run_id → queue.Queue
 _progress_queues: dict[int, queue.Queue] = {}
+# Cooperative stop signals: run_id → threading.Event (set() → pipeline halts)
+_stop_events: dict[int, threading.Event] = {}
 
 
 def _scrape_worker(run_id: int, prompt: str, max_jobs: int):
     """Background thread that runs the pipeline and pushes progress."""
     q = queue.Queue()
     _progress_queues[run_id] = q
+    stop_event = threading.Event()
+    _stop_events[run_id] = stop_event
     try:
         parsed = parse(prompt, max_jobs)
-        for progress in run_pipeline(prompt, parsed, max_jobs, run_id):
+        for progress in run_pipeline(prompt, parsed, max_jobs, run_id,
+                                     should_stop=stop_event.is_set):
             q.put(progress)
     except Exception as e:
         q.put({"error": str(e)})
     finally:
         q.put(None)  # Sentinel for completion
         _progress_queues.pop(run_id, None)
+        _stop_events.pop(run_id, None)
 
 
 @app.route("/")
@@ -54,6 +60,22 @@ def scrape():
     threading.Thread(target=_scrape_worker, args=(run_id, prompt, max_jobs), daemon=True).start()
 
     return jsonify({"run_id": run_id, "status": "started"})
+
+
+@app.route("/stop/<int:run_id>", methods=["POST"])
+def stop(run_id: int):
+    """Request a cooperative stop of a running scrape.
+
+    The pipeline halts before the next pass/job; everything collected so far is
+    already persisted and immediately downloadable via /download/<run_id>/<fmt>.
+    """
+    ev = _stop_events.get(run_id)
+    if ev is not None:
+        ev.set()
+        return jsonify({"run_id": run_id, "status": "stopping"})
+    # Not running (already finished or unknown) — nothing to stop, but the
+    # collected jobs (if any) remain downloadable.
+    return jsonify({"run_id": run_id, "status": "not_running"})
 
 
 @app.route("/stream/<int:run_id>")
