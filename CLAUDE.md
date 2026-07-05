@@ -125,7 +125,7 @@ HTTP endpoints (in `app.py`): `GET /`, `POST /scrape` (→ run_id), `GET /stream
 <!-- AUTO-MANAGED: git-insights -->
 ## Git Insights
 
-- The project was rebuilt from standalone Selenium/Playwright scripts (now in `_archive/`) into the prompt-driven engine — see commit "Prompt based scrapping". Original design notes live in `PLAN.md`, `TASKS.md`, `AI_SCRAPER_PLAN.md`.
+- The project was rebuilt from standalone Selenium/Playwright scripts (now in `_archive/`) into the prompt-driven engine — see commit "Prompt based scrapping". Original design notes live in `docs/PLAN.md`, `docs/TASKS.md`, `docs/AI_SCRAPER_PLAN.md`.
 - Deployment evolved toward Raspberry Pi + Cloudflare Tunnel (`run.sh`, multiple "Updated run.sh" commits) after earlier Render deployment attempts.
 
 <!-- END AUTO-MANAGED -->

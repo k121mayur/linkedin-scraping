@@ -159,7 +159,7 @@ linkedin-scraping/
 ├── templates/
 │   └── index.html          ← The web page you see in your browser (the form + progress bar)
 │
-├── static/                 ← Images used by the web page (logo, loading gif)
+├── static/                 ← Images used by the web page (logo)
 │
 ├── data/                   ← Created automatically. Holds the database + exports. (git-ignored)
 │
@@ -170,8 +170,7 @@ linkedin-scraping/
 ├── run.sh                  ← Automated installer for a Raspberry Pi + Cloudflare Tunnel
 │
 ├── _archive/               ← OLD, unused scraper scripts. Kept for reference only — ignore these.
-├── PLAN.md / TASKS.md      ← The original design notes and build checklist
-├── AI_SCRAPER_PLAN.md      ← The original roadmap document
+├── docs/                   ← Design notes and feature docs (PLAN.md, TASKS.md, AI_SCRAPER_PLAN.md, …)
 └── CLAUDE.md               ← Notes for the Claude AI coding assistant
 ```
 
@@ -326,7 +325,7 @@ uploaded or shared. Every setting below is read once in [`config/__init__.py`](c
 
 There are also optional **Gmail settings** (`GMAIL_*`) intended for automatically reading
 LinkedIn's email verification codes during login. This feature is **not currently wired into the
-live code** (it was deferred — see [TASKS.md](TASKS.md) T14), so you can ignore those for now.
+live code** (it was deferred — see [docs/TASKS.md](docs/TASKS.md) T14), so you can ignore those for now.
 
 ### Picking an AI provider
 
@@ -477,7 +476,7 @@ from easiest to hardest:
 
 - **Medium**
   - Finish the deferred **Gmail verification** feature (read LinkedIn's email codes automatically —
-    the settings already exist; see [TASKS.md](TASKS.md) T14).
+    the settings already exist; see [docs/TASKS.md](docs/TASKS.md) T14).
   - Add a **scheduler** so scrapes run automatically (e.g. every morning).
   - Add **email notifications** when a run finishes.
 
