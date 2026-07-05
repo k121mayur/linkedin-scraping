@@ -1,5 +1,8 @@
+# Secrets & auth
 .env
 playwright_auth.json
+
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
@@ -10,19 +13,25 @@ __pycache__/
 .mypy_cache/
 pip-log.txt
 pip-delete-this-directory.txt
-.DS_Store
-Thumbs.db
-*.log
-/dist/
-/build/
+
+# Virtual env
 /venv/
 /env/
 /env.bak/
+
+# Build
+/dist/
+/build/
+
+# Data & exports (auto-created at runtime)
 /data/
-/playwright_auth.json
 *.xlsx
 *.db
-__pycache__/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Claude Code auto-memory
 .claude/auto-memory/dirty-files*
