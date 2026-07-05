@@ -66,7 +66,7 @@
     html { scroll-behavior: smooth; }
 
     body {
-      min-height: 100dvh;
+      height: 100dvh;
       font-family: var(--font-body);
       color: var(--text);
       background: var(--bg-base);
@@ -74,7 +74,7 @@
       text-rendering: optimizeLegibility;
       line-height: 1.55;
       position: relative;
-      overflow-x: hidden;
+      overflow: hidden;
     }
 
     /* Ambient warmth: soft orange + peach glows over a light gray→white wash */
@@ -121,10 +121,11 @@
     .page {
       position: relative;
       z-index: var(--z-content);
-      min-height: 100dvh;
+      height: 100dvh;
       display: flex;
       flex-direction: column;
       padding: clamp(1.25rem, 3vw, 2.25rem);
+      overflow: hidden;
     }
 
     .shell { width: min(1180px, 100%); margin: 0 auto; }
@@ -136,6 +137,7 @@
       justify-content: space-between;
       gap: 1rem;
       padding-bottom: clamp(1.5rem, 4vw, 3rem);
+      flex-shrink: 0;
     }
     .brand { display: flex; align-items: center; gap: 0.85rem; }
     .brand__logo {
@@ -187,20 +189,25 @@
     /* ---------- Hero ---------- */
     main.shell {
       flex: 1;
+      min-height: 0;
       display: flex;
       flex-direction: column;
       justify-content: center;
+      overflow: hidden;
     }
     .hero {
       display: flex;
       flex-direction: column;
       align-items: center;
+      justify-content: center;
       gap: clamp(1.5rem, 4vw, 2.4rem);
       padding: clamp(0.5rem, 2vw, 1.25rem) 0 clamp(2rem, 5vw, 3rem);
+      min-height: 0;
+      width: 100%;
     }
 
     /* ---------- Intro ---------- */
-    .intro { max-width: 40rem; text-align: center; }
+    .intro { max-width: 40rem; text-align: center; flex-shrink: 0; }
     .eyebrow {
       display: inline-flex;
       align-items: center;
@@ -260,6 +267,9 @@
       background: var(--panel);
       border: 1px solid var(--line);
       box-shadow: var(--shadow);
+      min-height: 0;
+      max-height: 100%;
+      overflow-y: auto;
     }
 
     .panel__head {
@@ -561,6 +571,7 @@
       gap: 0.8rem;
       font-size: 0.8rem;
       color: rgba(255, 255, 255, 0.92);
+      flex-shrink: 0;
     }
     footer a { color: #fff; text-decoration: underline; text-underline-offset: 2px; transition: color 150ms; }
     footer a:hover { color: var(--cream); }
