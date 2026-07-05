@@ -1,7 +1,6 @@
 Flask>=3.0
-# Pinned to match the Playwright Docker base image (v1.48.0) so the preinstalled
-# browser binaries always match the client. Bumping this requires bumping the
-# base image tag in the Dockerfile in lockstep, or the browser won't launch.
+# Pinned so the Chromium build downloaded at Docker build time
+# (`playwright install chromium`) always matches the client library.
 playwright==1.48.0
 pandas>=2.0
 openpyxl>=3.1
