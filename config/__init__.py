@@ -55,6 +55,28 @@ GMAIL_VERIFICATION_SENDER = os.getenv("GMAIL_VERIFICATION_SENDER", "security-nor
 GMAIL_POLL_INTERVAL = float(os.getenv("GMAIL_POLL_INTERVAL", "8"))
 GMAIL_POLL_TIMEOUT = float(os.getenv("GMAIL_POLL_TIMEOUT", "180"))
 
+# --- Grants (LinkedIn posts) extraction ---
+MAX_GRANT_POSTS_DEFAULT = int(os.getenv("MAX_GRANT_POSTS_DEFAULT", "50"))
+MAX_POST_SEARCH_PAGES = int(os.getenv("MAX_POST_SEARCH_PAGES", "5"))       # content-search pages per keyword
+GRANT_ANALYZE_IMAGES = os.getenv("GRANT_ANALYZE_IMAGES", "true").lower() not in {"false", "0", "no"}
+GRANT_FOLLOW_LINKS = os.getenv("GRANT_FOLLOW_LINKS", "true").lower() not in {"false", "0", "no"}
+GRANT_MAX_LINKS_PER_POST = int(os.getenv("GRANT_MAX_LINKS_PER_POST", "2"))  # external sites fetched per post
+GRANT_MAX_IMAGES_PER_POST = int(os.getenv("GRANT_MAX_IMAGES_PER_POST", "2"))
+GRANT_RELEVANCE_THRESHOLD = float(os.getenv("GRANT_RELEVANCE_THRESHOLD", "0.5"))
+
+# --- Auth / role-based access ---
+# The admin account is hardcoded (overridable via env). Regular users live in
+# the SQLite `users` table and are managed by the admin from the web UI.
+ADMIN_NAME = os.getenv("ADMIN_NAME", "Administrator")
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@tamuku.in")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "TamukuAdmin@2026")
+SECRET_KEY = os.getenv("SECRET_KEY", "tamuku-dev-secret-change-me")
+
+# --- Outbound mail (welcome emails for new users; reuses the Gmail account) ---
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000")
+
 # --- Flask app settings ---
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 FLASK_PORT = int(os.getenv("PORT", "5000"))
