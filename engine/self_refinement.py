@@ -9,17 +9,25 @@ from engine import database as db
 from engine.search_strategy import build_queue, build_relaxed_queue
 from engine.linkedin_client import (
     search as li_search,
-    close as li_close,
     get_job_detail,
     canonical_view_url,
 )
-from engine.relevance import filter_relevant
+from engine.relevance import filter_relevant, _keyword_score
 
 
 def _log(msg: str) -> None:
     """Emit a progress line to the terminal (stdout) so a scrape is observable
-    live from the server shell / VS Code terminal, in both web and CLI mode."""
-    print(f"[scrape] {msg}", flush=True)
+    live from the server shell / VS Code terminal, in both web and CLI mode.
+
+    Job titles can contain characters (₹, •, em-dashes) that a Windows cp1252
+    console can't encode; a bare print() then raises UnicodeEncodeError and
+    kills the whole run. Degrade to ASCII instead of crashing.
+    """
+    line = f"[scrape] {msg}"
+    try:
+        print(line, flush=True)
+    except UnicodeEncodeError:
+        print(line.encode("ascii", "replace").decode("ascii"), flush=True)
 
 
 def _company_url_for(job: dict) -> str:
@@ -140,6 +148,15 @@ def run(prompt: str, parsed_plan: dict, max_jobs: int, run_id=None, should_stop=
             )
             continue
 
+        # Cap how many cards go to (slow) LLM scoring: pre-rank by the cheap
+        # keyword score and keep the most promising few multiples of what we
+        # still need. Only bites on small targets — for large runs the cap
+        # exceeds the page yield and everything is scored.
+        cap = max(need * 4, 12)
+        if len(fresh) > cap:
+            fresh.sort(key=lambda c: _keyword_score(c, parsed_plan), reverse=True)
+            fresh = fresh[:cap]
+
         # Score relevance on card data (title/company) — strict, no navigation.
         relevant = filter_relevant(fresh, parsed_plan)
         relevant.sort(key=lambda j: j.get("relevance_score", 0), reverse=True)
@@ -203,7 +220,9 @@ def run(prompt: str, parsed_plan: dict, max_jobs: int, run_id=None, should_stop=
         status = "partial"
     db.finish_run(run_id, status=status, jobs_found=len(collected))
     _log(f"Run {run_id} {status} - {len(collected)}/{max_jobs} jobs in {attempts} attempt(s)")
-    li_close()
+    # The browser is deliberately left open: the next run reuses the warm,
+    # already-authenticated session (~35s faster to the first job).
+    # linkedin_client._ensure_auth() revalidates and relaunches if it died.
 
     # Emit a terminal Progress so the UI can render the final state (esp. a
     # user-requested stop) and reveal the download links for what was collected.

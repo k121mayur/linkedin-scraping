@@ -8,13 +8,16 @@ link for every card is built from its numeric job id (canonical
 
 from __future__ import annotations
 
+import queue as _queue
 import random
+import threading
 import time
 import re
 from config import (
     LINKEDIN_EMAIL, LINKEDIN_PASSWORD, PLAYWRIGHT_HEADLESS,
     AUTH_FILE_PATH, DRY_RUN, LINKEDIN_JOB_VIEW_URL,
     JOBS_PER_PAGE, MAX_SEARCH_PAGES, SCROLL_PASSES, PAGE_NAV_TIMEOUT,
+    MAX_POST_SEARCH_PAGES,
 )
 from engine.email_verifier import fetch_verification_code, gmail_configured
 
@@ -22,6 +25,7 @@ LINKEDIN_URL = "https://www.linkedin.com"
 LOGIN_URL = f"{LINKEDIN_URL}/login"
 FEED_URL = f"{LINKEDIN_URL}/feed/"
 JOBS_SEARCH_URL = f"{LINKEDIN_URL}/jobs/search/"
+CONTENT_SEARCH_URL = f"{LINKEDIN_URL}/search/results/content/"
 
 _pw = None
 _browser = None
@@ -286,9 +290,37 @@ def _login():
         )
 
 
-def _ensure_auth():
-    """Start the browser and ensure we have an authenticated page."""
+def _reset_if_dead():
+    """If a previous run's browser died (crash, network drop, manual kill),
+    drop the singletons so a fresh launch happens instead of erroring on dead
+    handles. Keeps the warm-browser reuse between runs safe."""
     global _pw, _browser, _context, _page
+    if _browser is None:
+        return
+    alive = False
+    try:
+        alive = _browser.is_connected()
+    except Exception:
+        alive = False
+    if not alive:
+        _close_sync()
+        return
+    if _page is not None:
+        try:
+            if _page.is_closed():
+                _page = None
+        except Exception:
+            _page = None
+
+
+def _ensure_auth():
+    """Start the browser and ensure we have an authenticated page.
+
+    The browser is kept open between runs (a warm, already-authenticated page
+    makes the next run start ~35s faster); this call is what re-validates it.
+    """
+    global _pw, _browser, _context, _page
+    _reset_if_dead()
     if _page is not None and _is_logged_in(_page):
         return
 
@@ -336,7 +368,7 @@ def _page_safe():
 
 # ── Search ───────────────────────────────────────────────────
 
-def search(query: str, location: str = "", limit: int | None = None) -> list[dict]:
+def _search_sync(query: str, location: str = "", limit: int | None = None) -> list[dict]:
     """Search LinkedIn jobs, paginating to gather unique cards.
 
     Returns a list of card dicts; every card has a real canonical ``link``
@@ -370,9 +402,7 @@ def search(query: str, location: str = "", limit: int | None = None) -> list[dic
         if not _wait_for_cards(_page_safe()):
             break  # no results on this page → query exhausted
 
-        _scroll_to_load(_page_safe())
-
-        page_cards = _extract_cards(_page_safe())
+        page_cards = _collect_cards_with_scroll(_page_safe())
         new_on_page = 0
         for card in page_cards:
             jid = card["job_id"]
@@ -403,10 +433,20 @@ def _build_search_url(query: str, location: str, start: int) -> str:
     return JOBS_SEARCH_URL + "?" + "&".join(params)
 
 
+# The jobs list renders in one of two layouts: legacy cards with /jobs/view/
+# anchors, or the current virtualized list of li[data-occludable-job-id] items
+# (whose anchors materialize lazily). Waiting/extracting must accept both.
+_CARD_PRESENCE_SELECTOR = (
+    'a[href*="/jobs/view/"], li[data-occludable-job-id], '
+    'div.job-card-container, [data-job-id]'
+)
+
+
 def _wait_for_cards(page) -> bool:
-    """Wait for at least one job-view anchor to appear. False if none/none found."""
+    """Wait for at least one job card (any layout). False only when the page
+    explicitly says there are no results."""
     try:
-        page.wait_for_selector('a[href*="/jobs/view/"]', timeout=8000)
+        page.wait_for_selector(_CARD_PRESENCE_SELECTOR, timeout=15000)
         return True
     except Exception:
         # Could be a genuinely empty result set — check the empty-state text.
@@ -416,51 +456,109 @@ def _wait_for_cards(page) -> bool:
                 return False
         except Exception:
             pass
-        return bool(page.query_selector('a[href*="/jobs/view/"]'))
+        return bool(page.query_selector(_CARD_PRESENCE_SELECTOR))
 
 
 def _scroll_to_load(page):
     """Scroll the (virtualized) results list so all ~25 cards on the page render."""
     for _ in range(SCROLL_PASSES):
-        try:
-            page.evaluate(
-                """() => {
-                    const anchors = document.querySelectorAll('a[href*="/jobs/view/"]');
-                    if (anchors.length) {
-                        anchors[anchors.length - 1].scrollIntoView({block: 'center'});
-                    }
-                    const list = document.querySelector(
-                        '.jobs-search-results-list, .scaffold-layout__list, ul.jobs-search__results-list'
-                    );
-                    if (list) { list.scrollTop = list.scrollHeight; }
-                }"""
-            )
-        except Exception:
-            pass
+        _scroll_step(page)
         time.sleep(0.6)
 
 
+def _scroll_step(page):
+    """Advance the results list by roughly one viewport (virtualized lists render
+    only the visible window, so we walk through it step by step)."""
+    try:
+        page.evaluate(
+            """() => {
+                const list = document.querySelector(
+                    '.jobs-search-results-list, .scaffold-layout__list > div, ' +
+                    '.scaffold-layout__list, ul.jobs-search__results-list'
+                );
+                if (list && list.scrollHeight > list.clientHeight) {
+                    list.scrollBy(0, Math.round(list.clientHeight * 0.8));
+                } else {
+                    window.scrollBy(0, Math.round(window.innerHeight * 0.8));
+                }
+            }"""
+        )
+    except Exception:
+        pass
+
+
+def _collect_cards_with_scroll(page) -> list[dict]:
+    """Extract cards repeatedly while walking the virtualized list, merging by
+    job id. Virtualization renders a card's content only while it's near the
+    viewport (and blanks it after it scrolls away), so a single extraction
+    loses most titles — instead we scrollIntoView successive list items (which
+    scrolls whatever ancestor pane owns the scrollbar) and capture each card
+    while it's rendered."""
+    merged: dict[str, dict] = {}
+
+    def _merge():
+        for card in _extract_cards(page):
+            prev = merged.get(card["job_id"])
+            if prev is None:
+                merged[card["job_id"]] = card
+            else:
+                # Fill any fields the earlier capture was missing.
+                for k, v in card.items():
+                    if v and not prev.get(k):
+                        prev[k] = v
+
+    _merge()
+    idx = 0
+    for _ in range(20):  # hard cap; a page holds ~25 items → ~9 steps of 3
+        try:
+            total = page.evaluate(
+                """(i) => {
+                    const lis = document.querySelectorAll('li[data-occludable-job-id]');
+                    if (lis.length && i < lis.length) {
+                        lis[Math.min(i, lis.length - 1)].scrollIntoView({block: 'center'});
+                    }
+                    return lis.length;
+                }""",
+                idx,
+            ) or 0
+        except Exception:
+            total = 0
+        time.sleep(0.45)
+        _merge()
+        idx += 3
+        if not total or idx >= total + 3:
+            break
+    return list(merged.values())
+
+
 def _extract_cards(page) -> list[dict]:
-    """Extract job cards from the DOM, keyed off stable /jobs/view/<id> anchors."""
+    """Extract job cards from the DOM.
+
+    Handles both layouts: legacy /jobs/view/<id> anchors AND the current
+    virtualized list items (li[data-occludable-job-id] / [data-job-id]), whose
+    anchors only materialize once scrolled into view — keying on the data
+    attribute captures them even before that happens.
+    """
     try:
         raw = page.evaluate(
             """() => {
                 const seen = {};
                 const out = [];
-                const anchors = document.querySelectorAll('a[href*="/jobs/view/"]');
-                anchors.forEach(a => {
-                    const href = a.getAttribute('href') || '';
-                    const m = href.match(/\\/jobs\\/view\\/(\\d+)/);
-                    if (!m) return;
-                    const id = m[1];
-                    if (seen[id]) return;
+
+                const readCard = (card, id, titleHint) => {
+                    if (!id || !/^\\d+$/.test(id) || seen[id]) return;
                     seen[id] = true;
-                    const card = a.closest('li, div.job-card-container, div.base-card') || a.parentElement;
-                    let title = (a.getAttribute('aria-label') || a.innerText || '').trim();
-                    const firstLine = title.split('\\n').map(s => s.trim()).filter(Boolean)[0];
-                    if (firstLine) title = firstLine;
+                    let title = (titleHint || '').trim();
                     let company = '', location = '';
                     if (card) {
+                        if (!title) {
+                            const t = card.querySelector(
+                                'a.job-card-list__title, a.job-card-container__link, ' +
+                                '.job-card-list__title--link, .artdeco-entity-lockup__title, ' +
+                                'a[href*="/jobs/view/"], strong'
+                            );
+                            if (t) title = (t.getAttribute('aria-label') || t.innerText || '').trim();
+                        }
                         const c = card.querySelector(
                             '.artdeco-entity-lockup__subtitle, .job-card-container__primary-description, ' +
                             '.job-card-container__company-name, .base-search-card__subtitle'
@@ -468,12 +566,33 @@ def _extract_cards(page) -> list[dict]:
                         if (c) company = c.innerText.trim();
                         const l = card.querySelector(
                             '.job-card-container__metadata-item, .artdeco-entity-lockup__caption, ' +
-                            '.job-search-card__location'
+                            '.job-search-card__location, .job-card-container__metadata-wrapper li'
                         );
                         if (l) location = l.innerText.trim();
                     }
+                    const firstLine = title.split('\\n').map(s => s.trim()).filter(Boolean)[0];
+                    if (firstLine) title = firstLine;
                     out.push({job_id: id, title: title, company: company, location: location});
+                };
+
+                // Layout A: explicit /jobs/view/<id> anchors.
+                document.querySelectorAll('a[href*="/jobs/view/"]').forEach(a => {
+                    const m = (a.getAttribute('href') || '').match(/\\/jobs\\/view\\/(\\d+)/);
+                    if (!m) return;
+                    const card = a.closest('li, div.job-card-container, div.base-card') || a.parentElement;
+                    readCard(card, m[1], a.getAttribute('aria-label') || a.innerText || '');
                 });
+
+                // Layout B: virtualized list items carrying the job id as a data attribute.
+                document.querySelectorAll('li[data-occludable-job-id]').forEach(li => {
+                    readCard(li, li.getAttribute('data-occludable-job-id') || '', '');
+                });
+                document.querySelectorAll('[data-job-id]').forEach(el => {
+                    const id = el.getAttribute('data-job-id') || '';
+                    const card = el.closest('li') || el;
+                    readCard(card, id, '');
+                });
+
                 return out;
             }"""
         ) or []
@@ -499,7 +618,7 @@ def _extract_cards(page) -> list[dict]:
 
 # ── Detail ───────────────────────────────────────────────────
 
-def get_job_detail(job_url_or_id: str) -> dict:
+def _get_job_detail_sync(job_url_or_id: str) -> dict:
     """Fetch a job's full detail. Always returns a dict with a valid apply_url.
 
     Never returns None: on any failure it still returns the canonical link so the
@@ -607,7 +726,227 @@ def _extract_company_url(page) -> str:
         return ""
 
 
-def close():
+# ── Posts (content) search — grants pipeline ────────────────
+
+def _search_posts_sync(keyword: str, limit: int | None = None) -> list[dict]:
+    """Search LinkedIn *posts* (the content search with the Posts filter applied)
+    and extract each post: URN, permalink, text, author, relative posted date and
+    any attached image URLs. Recent posts first.
+    """
+    if DRY_RUN:
+        return _mock_search_posts(keyword)
+
+    try:
+        _ensure_auth()
+    except Exception as e:
+        import sys
+        print(f"[linkedin_client] Auth failed: {e}", file=sys.stderr, flush=True)
+
+    if _page is None or not _is_logged_in(_page):
+        return []
+
+    results: list[dict] = []
+    seen_urns: set[str] = set()
+
+    for page_idx in range(1, MAX_POST_SEARCH_PAGES + 1):
+        url = (f"{CONTENT_SEARCH_URL}?keywords={_url_quote(keyword)}"
+               f"&sortBy=%22date_posted%22")
+        if page_idx > 1:
+            url += f"&page={page_idx}"
+        try:
+            _page_safe().goto(url, wait_until="domcontentloaded", timeout=PAGE_NAV_TIMEOUT)
+        except Exception:
+            break
+
+        _throttle(1.5, 2.5)
+        try:
+            _page_safe().wait_for_selector('div[data-urn*="urn:li:activity"], '
+                                           'div[data-chameleon-result-urn]', timeout=10000)
+        except Exception:
+            break  # no posts on this page → keyword exhausted
+
+        _scroll_posts_to_load(_page_safe())
+        _expand_see_more(_page_safe())
+
+        page_posts = _extract_post_cards(_page_safe())
+        new_on_page = 0
+        for post in page_posts:
+            urn = post["post_urn"]
+            if urn in seen_urns:
+                continue
+            seen_urns.add(urn)
+            results.append(post)
+            new_on_page += 1
+
+        if new_on_page == 0:
+            break
+        if limit and len(results) >= limit:
+            break
+
+    return results
+
+
+def _scroll_posts_to_load(page):
+    """Scroll the content-search feed so lazily-rendered posts materialize."""
+    for _ in range(SCROLL_PASSES):
+        try:
+            page.evaluate("() => window.scrollBy(0, document.body.scrollHeight)")
+        except Exception:
+            pass
+        time.sleep(0.7)
+
+
+def _expand_see_more(page):
+    """Click every '…see more' toggle so the full post text is in the DOM."""
+    try:
+        page.evaluate(
+            """() => {
+                document.querySelectorAll(
+                    'button.feed-shared-inline-show-more-text__see-more-less-toggle, ' +
+                    'button.see-more, button[aria-label*="see more" i]'
+                ).forEach(b => { try { b.click(); } catch (e) {} });
+            }"""
+        )
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+
+def _extract_post_cards(page) -> list[dict]:
+    """Extract post data from the content-search DOM, keyed on activity URNs."""
+    try:
+        raw = page.evaluate(
+            """() => {
+                const out = [];
+                const seen = {};
+                const nodes = document.querySelectorAll(
+                    'div[data-urn*="urn:li:activity"], div[data-chameleon-result-urn*="urn:li:activity"]'
+                );
+                nodes.forEach(node => {
+                    const urn = node.getAttribute('data-urn') ||
+                                node.getAttribute('data-chameleon-result-urn') || '';
+                    const m = urn.match(/urn:li:activity:(\\d+)/);
+                    if (!m || seen[m[1]]) return;
+                    seen[m[1]] = true;
+
+                    let text = '';
+                    const textEl = node.querySelector(
+                        '.update-components-text, .feed-shared-inline-show-more-text, ' +
+                        '.feed-shared-update-v2__description, .update-components-update-v2__commentary'
+                    );
+                    if (textEl) text = textEl.innerText.trim();
+
+                    let author = '', authorUrl = '';
+                    const actorName = node.querySelector(
+                        '.update-components-actor__title span[aria-hidden="true"], ' +
+                        '.update-components-actor__title, .update-components-actor__name'
+                    );
+                    if (actorName) author = actorName.innerText.trim().split('\\n')[0];
+                    const actorLink = node.querySelector(
+                        'a.update-components-actor__meta-link, a.update-components-actor__image, ' +
+                        '.update-components-actor a[href*="linkedin.com"], .update-components-actor a'
+                    );
+                    if (actorLink) {
+                        try {
+                            const u = new URL(actorLink.getAttribute('href'), 'https://www.linkedin.com');
+                            authorUrl = 'https://www.linkedin.com' + u.pathname;
+                        } catch (e) {}
+                    }
+
+                    let posted = '';
+                    const sub = node.querySelector(
+                        '.update-components-actor__sub-description span[aria-hidden="true"], ' +
+                        '.update-components-actor__sub-description'
+                    );
+                    if (sub) posted = sub.innerText.trim().split('•')[0].trim();
+
+                    const images = [];
+                    node.querySelectorAll(
+                        '.update-components-image img, .feed-shared-image img, ' +
+                        '.update-components-image__container img, .ivm-view-attr__img-wrapper img'
+                    ).forEach(img => {
+                        const src = img.getAttribute('src') || '';
+                        if (src.startsWith('http') && !src.includes('profile-displayphoto') &&
+                            !images.includes(src)) {
+                            images.push(src);
+                        }
+                    });
+
+                    out.push({
+                        activity_id: m[1],
+                        urn: 'urn:li:activity:' + m[1],
+                        text: text,
+                        author: author,
+                        author_url: authorUrl,
+                        posted: posted,
+                        images: images.slice(0, 4),
+                    });
+                });
+                return out;
+            }"""
+        ) or []
+    except Exception:
+        raw = []
+
+    posts = []
+    for item in raw:
+        urn = str(item.get("urn", "")).strip()
+        if not urn:
+            continue
+        posts.append({
+            "post_urn": urn,
+            "post_url": f"{LINKEDIN_URL}/feed/update/{urn}/",
+            "text": (item.get("text") or "").strip()[:12000],
+            "author": (item.get("author") or "").strip(),
+            "author_url": (item.get("author_url") or "").strip(),
+            "posted": (item.get("posted") or "").strip(),
+            "image_urls": item.get("images") or [],
+        })
+    return posts
+
+
+def _fetch_image_b64_sync(url: str) -> str:
+    """Download an image through the authenticated browser context and return it
+    base64-encoded (empty string on any failure)."""
+    import base64
+    if DRY_RUN or not url:
+        return ""
+    try:
+        if _context is not None:
+            resp = _context.request.get(url, timeout=20000)
+            if resp.ok:
+                return base64.b64encode(resp.body()).decode()
+    except Exception:
+        pass
+    # Fallback: plain HTTP fetch (LinkedIn media CDN URLs are usually public).
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return base64.b64encode(r.read()).decode()
+    except Exception:
+        return ""
+
+
+def _mock_search_posts(keyword: str) -> list[dict]:
+    return [
+        {
+            "post_urn": f"urn:li:activity:mock{i}_{abs(hash(keyword)) % 1000}",
+            "post_url": f"{LINKEDIN_URL}/feed/update/urn:li:activity:mock{i}/",
+            "text": (f"Grant funding opportunity #{i} for NGOs: {keyword}. "
+                     "Apply by 30 September 2026. Grants up to $50,000 for registered "
+                     "nonprofits working in education and health. "
+                     "Details: https://example.org/grants Contact: grants@example.org"),
+            "author": "Mock Foundation",
+            "author_url": "https://www.linkedin.com/company/mock-foundation",
+            "posted": "2w",
+            "image_urls": [],
+        }
+        for i in range(1, 6)
+    ]
+
+
+def _close_sync():
     global _pw, _browser, _context, _page
     for closer in (
         lambda: _context.close() if _context else None,
@@ -619,6 +958,67 @@ def close():
         except Exception:
             pass
     _pw = _browser = _context = _page = None
+
+
+# ── Browser-thread dispatcher ────────────────────────────────
+# Playwright's sync API is bound to the thread that started it, but the Flask
+# app runs every scrape in a fresh daemon thread. All browser work is therefore
+# executed on ONE persistent worker thread; the public functions below proxy
+# onto it. This is what makes the warm browser reusable across runs (and it
+# removes the old "module globals are not thread-safe" caveat).
+
+_task_q: _queue.Queue | None = None
+_browser_thread: threading.Thread | None = None
+_dispatch_lock = threading.Lock()
+
+
+def _browser_loop():
+    while True:
+        fn, args, kwargs, out = _task_q.get()
+        try:
+            out["result"] = fn(*args, **kwargs)
+        except BaseException as e:  # propagate to the caller, keep the loop alive
+            out["error"] = e
+        finally:
+            out["done"].set()
+
+
+def _on_browser_thread(fn, *args, **kwargs):
+    global _task_q, _browser_thread
+    if threading.current_thread() is _browser_thread:
+        return fn(*args, **kwargs)
+    with _dispatch_lock:
+        if _browser_thread is None or not _browser_thread.is_alive():
+            _task_q = _queue.Queue()
+            _browser_thread = threading.Thread(
+                target=_browser_loop, daemon=True, name="linkedin-browser")
+            _browser_thread.start()
+        out: dict = {"done": threading.Event()}
+        _task_q.put((fn, args, kwargs, out))
+    out["done"].wait()
+    if "error" in out:
+        raise out["error"]
+    return out["result"]
+
+
+def search(query: str, location: str = "", limit: int | None = None) -> list[dict]:
+    return _on_browser_thread(_search_sync, query, location, limit)
+
+
+def get_job_detail(job_url_or_id: str) -> dict:
+    return _on_browser_thread(_get_job_detail_sync, job_url_or_id)
+
+
+def search_posts(keyword: str, limit: int | None = None) -> list[dict]:
+    return _on_browser_thread(_search_posts_sync, keyword, limit)
+
+
+def fetch_image_b64(url: str) -> str:
+    return _on_browser_thread(_fetch_image_b64_sync, url)
+
+
+def close():
+    return _on_browser_thread(_close_sync)
 
 
 # ── Helpers ──────────────────────────────────────────────────
