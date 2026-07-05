@@ -89,7 +89,7 @@
         radial-gradient(720px 540px at 6% 102%, rgba(252, 228, 214, 0.55), transparent 55%),
         linear-gradient(180deg, #FFFFFF, var(--gray-100) 82%);
     }
-    /* Decorative dot-grid, faded into the bottom-right corner */
+    /* Decorative dot-grid, faded into the bottom-left corner (under the intro text) */
     body::after {
       content: "";
       position: fixed;
@@ -99,9 +99,9 @@
       opacity: 0.7;
       background-image: radial-gradient(rgba(255, 107, 0, 0.16) 1.4px, transparent 1.5px);
       background-size: 22px 22px;
-      background-position: bottom right;
-      -webkit-mask: radial-gradient(440px 380px at 100% 100%, #000, transparent 72%);
-              mask: radial-gradient(440px 380px at 100% 100%, #000, transparent 72%);
+      background-position: bottom left;
+      -webkit-mask: radial-gradient(440px 380px at 0% 100%, #000, transparent 72%);
+              mask: radial-gradient(440px 380px at 0% 100%, #000, transparent 72%);
     }
 
     .skip-link {
@@ -240,6 +240,24 @@
       padding: clamp(0.5rem, 2vw, 1.25rem) 0 clamp(2rem, 5vw, 3rem);
       min-height: 0;
       width: 100%;
+    }
+    /* Split layout: intro text on the left, extraction panel on the right */
+    .hero--split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
+      grid-template-rows: minmax(0, 1fr);
+      align-items: center;
+      gap: clamp(1.75rem, 4.5vw, 4rem);
+      height: 100%;
+    }
+    .hero--split .intro {
+      text-align: left;
+      max-width: 34rem;
+    }
+    .hero--split .intro p { margin: 0; }
+    .hero--split .panel {
+      width: 100%;
+      justify-self: end;
     }
 
     /* ---------- Intro ---------- */
@@ -594,6 +612,152 @@
     .dl-btn:active { transform: translateY(0) scale(0.98); }
     .dl-btn:focus-visible { outline: none; box-shadow: var(--ring); }
 
+    /* ---------- Masthead user controls ---------- */
+    .mast-right { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end; }
+    .user-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.45rem 0.85rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--white);
+      font-size: 0.78rem;
+      color: var(--text-soft);
+    }
+    .user-chip b { color: var(--text); font-weight: 600; }
+    .ghost-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.95rem;
+      border-radius: 999px;
+      border: 1px solid var(--line-strong);
+      background: var(--peach);
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: 0.78rem;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      transition: border-color 150ms, background 150ms, color 150ms, transform 120ms;
+    }
+    .ghost-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--peach-2); }
+    .ghost-btn:active { transform: scale(0.97); }
+    .ghost-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+    .ghost-btn svg { width: 14px; height: 14px; }
+
+    /* ---------- Admin users modal ---------- */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      background: rgba(26, 26, 46, 0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.25rem;
+      animation: fade-in 180ms ease both;
+    }
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+    .modal {
+      width: min(520px, 100%);
+      max-height: min(660px, 92dvh);
+      overflow-y: auto;
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow);
+      padding: clamp(1.4rem, 4vw, 2rem);
+      animation: fade-up 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    .modal__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.1rem; }
+    .modal__title { font-family: var(--font-display); font-weight: 600; font-size: 1.05rem; }
+    .modal__close {
+      border: none;
+      background: var(--cream);
+      border-radius: 50%;
+      width: 30px; height: 30px;
+      display: grid; place-items: center;
+      color: var(--text-soft);
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      transition: background 150ms, color 150ms;
+    }
+    .modal__close:hover { background: var(--peach); color: var(--accent); }
+    .modal form { display: grid; gap: 0.8rem; margin-bottom: 1.3rem; }
+    .modal input[type="text"], .modal input[type="email"], .modal input[type="password"] {
+      width: 100%;
+      padding: 0.7rem 0.9rem;
+      font-family: inherit;
+      font-size: 0.9rem;
+      color: var(--text);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--r-sm);
+      background: var(--white);
+      transition: border-color 160ms, box-shadow 160ms;
+    }
+    .modal input:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+    .modal__msg { font-size: 0.82rem; min-height: 1.2em; }
+    .modal__msg.ok { color: var(--success); }
+    .modal__msg.err { color: var(--danger); }
+    .add-user-btn {
+      justify-self: start;
+      border: none;
+      border-radius: 999px;
+      padding: 0.65rem 1.4rem;
+      font-family: var(--font-display);
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #fff;
+      background: var(--accent);
+      cursor: pointer;
+      transition: background 160ms, transform 140ms, filter 140ms;
+    }
+    .add-user-btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
+    .add-user-btn:disabled { cursor: progress; filter: saturate(0.7); transform: none; }
+    .user-list { display: grid; gap: 0.5rem; }
+    .user-list__title {
+      font-family: var(--font-display);
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      margin-bottom: 0.2rem;
+    }
+    .user-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.8rem;
+      padding: 0.6rem 0.85rem;
+      border-radius: var(--r-sm);
+      background: var(--cream);
+      border: 1px solid var(--line);
+      font-size: 0.84rem;
+    }
+    .user-row__meta { min-width: 0; }
+    .user-row__name { font-weight: 600; color: var(--text); }
+    .user-row__email { color: var(--text-faint); font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; }
+    .user-del {
+      flex: none;
+      border: 1px solid var(--danger);
+      background: #FDECEC;
+      color: var(--danger);
+      border-radius: 999px;
+      padding: 0.32rem 0.85rem;
+      font-family: var(--font-display);
+      font-size: 0.74rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 150ms, transform 120ms;
+    }
+    .user-del:hover { background: #FBDADA; }
+    .user-del:disabled { cursor: progress; opacity: 0.6; }
+    .user-list__empty { font-size: 0.82rem; color: var(--text-faint); padding: 0.4rem 0.2rem; }
+
     /* ---------- Footer ---------- */
     footer {
       margin-top: clamp(1.5rem, 4vw, 2.5rem);
@@ -629,6 +793,15 @@
     @media (max-width: 920px) {
       .hero { gap: 2rem; padding-bottom: 1.5rem; }
       .intro p { max-width: 52ch; }
+      .hero--split {
+        display: flex;
+        flex-direction: column;
+        height: auto;
+        overflow-y: auto;
+      }
+      .hero--split .intro { text-align: center; max-width: 40rem; }
+      .hero--split .intro p { margin: 0 auto; }
+      .hero--split .panel { justify-self: auto; max-height: none; overflow-y: visible; }
     }
     @media (max-width: 560px) {
       .controls { grid-template-columns: 1fr; align-items: stretch; }
@@ -658,7 +831,20 @@
           <span class="brand__name" id="brand-fallback" hidden>Tamuku</span>
           <span class="brand__tag">Job extraction engine</span>
         </div>
-        <span class="status-pill"><span class="status-dot" aria-hidden="true"></span> Engine online</span>
+        <div class="mast-right">
+          <span class="status-pill"><span class="status-dot" aria-hidden="true"></span> Engine online</span>
+          <span class="user-chip">Signed in as <b>{{ user.name }}</b>{% if is_admin %} · admin{% endif %}</span>
+          {% if is_admin %}
+          <button type="button" class="ghost-btn" id="manage-users-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            Users
+          </button>
+          {% endif %}
+          <a class="ghost-btn" href="/logout">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Log out
+          </a>
+        </div>
       </header>
 
       <nav class="tabbar reveal" role="tablist" aria-label="Extraction mode">
@@ -667,9 +853,9 @@
       </nav>
 
       <main class="shell" style="padding:0">
-        <div class="hero" id="panel-jobs" data-tab-panel="jobs" role="tabpanel" aria-labelledby="tab-jobs">
+        <div class="hero hero--split" id="panel-jobs" data-tab-panel="jobs" role="tabpanel" aria-labelledby="tab-jobs">
 
-          <!-- Minimal intro — everything points to the panel below -->
+          <!-- Left: intro copy -->
           <section class="intro reveal d1" aria-labelledby="headline">
             <span class="eyebrow"><b>AI</b> Prompt-driven extraction</span>
             <h1 id="headline">Turn one sentence into a <span class="grad">ranked list of LinkedIn jobs</span>.</h1>
@@ -774,12 +960,111 @@
 
         </div>
 
-        <div class="hero" id="panel-grants" data-tab-panel="grants" role="tabpanel" aria-labelledby="tab-grants" hidden>
+        <div class="hero hero--split" id="panel-grants" data-tab-panel="grants" role="tabpanel" aria-labelledby="tab-grants" hidden>
+
+          <!-- Left: intro copy -->
           <section class="intro reveal d1" aria-labelledby="grants-headline">
-            <span class="eyebrow"><b>AI</b> Prompt-driven extraction</span>
-            <h1 id="grants-headline">Grants content will render here.</h1>
-            <p>The Grants extraction panel is built out in the next task.</p>
+            <span class="eyebrow"><b>AI</b> Funding-post analysis</span>
+            <h1 id="grants-headline">Find <span class="grad">grant &amp; funding opportunities</span> hiding in LinkedIn posts.</h1>
+            <p>The engine searches LinkedIn posts, reads the text, images and linked websites, and extracts every funding detail — funder, deadline, amount, eligibility, how to apply.</p>
           </section>
+
+          <!-- Right: the grants action panel -->
+          <section id="grants-panel" class="panel reveal d2" aria-labelledby="g-panel-title">
+            <div class="panel__head">
+              <div>
+                <div class="panel__title" id="g-panel-title">New grants extraction</div>
+                <div class="panel__sub">Describe the funding you need, set a target, run it.</div>
+              </div>
+            </div>
+
+            <div id="g-error" class="error-box" hidden role="alert">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12" y2="16.5"/>
+              </svg>
+              <span id="g-error-text"></span>
+            </div>
+
+            <form id="g-scrape-form" novalidate>
+              <div class="field">
+                <span class="field__label">
+                  What funding are you looking for?
+                  <span class="field__hint">sector, cause, geography</span>
+                </span>
+                <textarea id="g-prompt" name="prompt" required
+                  placeholder="e.g. Grant funding opportunities for NGOs working in education across India"></textarea>
+                <div class="chips-group">
+                  <span class="chips__title">Quick starts — tap to fill the prompt</span>
+                  <div class="chips" aria-label="Example grant prompts">
+                    <button type="button" class="chip" data-example-for="g-prompt" data-example="Grant funding opportunities for NGOs in India">NGO grants · India</button>
+                    <button type="button" class="chip" data-example-for="g-prompt" data-example="CSR funding and calls for proposals for education nonprofits">CSR · Education</button>
+                    <button type="button" class="chip" data-example-for="g-prompt" data-example="Seed funding and fellowships for health-sector NGOs">Health · Fellowships</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="controls">
+                <div class="count-field">
+                  <span class="field__label">Target post count</span>
+                  <div class="count-row">
+                    <input type="number" id="g-max" name="max_jobs" value="50" min="5" max="500" aria-label="Target grant post count">
+                    <button type="button" class="preset" data-preset-for="g-max" data-preset="25">25</button>
+                    <button type="button" class="preset is-active" data-preset-for="g-max" data-preset="50">50</button>
+                    <button type="button" class="preset" data-preset-for="g-max" data-preset="100">100</button>
+                  </div>
+                </div>
+                <button type="submit" id="g-submit-btn" class="submit">
+                  <span id="g-submit-label">Start extraction</span>
+                  <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/></svg>
+                  <svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+                </button>
+              </div>
+            </form>
+
+            <div id="g-progress" class="progress" hidden aria-live="polite">
+              <div class="progress__head">
+                <span class="progress__status" id="g-progress-text">Initializing…</span>
+                <div class="progress__head-right">
+                  <span class="progress__pct" id="g-progress-pct">0%</span>
+                  <button type="button" id="g-stop-btn" class="stop-btn" hidden aria-label="Stop the run and keep collected grant posts">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                    <span id="g-stop-label">Stop</span>
+                  </button>
+                </div>
+              </div>
+              <div class="stats">
+                <div class="stat stat--collected">
+                  <span class="stat__num" id="g-stat-collected">0</span>
+                  <span class="stat__label">Collected</span>
+                </div>
+                <div class="stat">
+                  <span class="stat__num" id="g-stat-target">0</span>
+                  <span class="stat__label">Target</span>
+                </div>
+                <div class="stat">
+                  <span class="stat__num" id="g-stat-passes">0</span>
+                  <span class="stat__label">Passes</span>
+                </div>
+              </div>
+              <div class="bar"><div class="bar__fill" id="g-progress-fill"></div></div>
+              <div class="progress__detail" id="g-progress-detail"></div>
+              <div class="downloads" id="g-download-links" hidden>
+                <a class="dl-btn" id="g-dl-xlsx" href="#" download>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+                  XLSX
+                </a>
+                <a class="dl-btn" id="g-dl-csv" href="#" download>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+                  CSV
+                </a>
+                <a class="dl-btn" id="g-dl-json" href="#" download>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+                  JSON
+                </a>
+              </div>
+            </div>
+          </section>
+
         </div>
       </main>
 
@@ -795,29 +1080,38 @@
     </div>
   </div>
 
+  {% if is_admin %}
+  <!-- Admin: user management modal -->
+  <div class="modal-overlay" id="users-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="users-modal-title">
+      <div class="modal__head">
+        <span class="modal__title" id="users-modal-title">Manage users</span>
+        <button type="button" class="modal__close" id="users-modal-close" aria-label="Close">✕</button>
+      </div>
+
+      <form id="add-user-form" novalidate>
+        <span class="field__label">Add a new user
+          <span class="field__hint">they receive their credentials by email</span>
+        </span>
+        <input type="text" id="new-user-name" placeholder="Full name" autocomplete="off" required>
+        <input type="email" id="new-user-email" placeholder="Email address" autocomplete="off" required>
+        <input type="password" id="new-user-password" placeholder="Password (min 6 characters)" autocomplete="new-password" required>
+        <div class="modal__msg" id="add-user-msg" aria-live="polite"></div>
+        <button type="submit" class="add-user-btn" id="add-user-btn">Add user</button>
+      </form>
+
+      <div class="user-list">
+        <span class="user-list__title">Existing users</span>
+        <div id="user-list-body">
+          <div class="user-list__empty">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
 <script>
 const $ = (id) => document.getElementById(id);
-const form = $('scrape-form');
-const errorBox = $('error');
-const errorText = $('error-text');
-const promptEl = $('prompt');
-const maxJobsEl = $('max-jobs');
-const submitBtn = $('submit-btn');
-const submitLabel = $('submit-label');
-const progressSection = $('progress');
-const progressText = $('progress-text');
-const progressPct = $('progress-pct');
-const progressFill = $('progress-fill');
-const progressDetail = $('progress-detail');
-const statCollected = $('stat-collected');
-const statTarget = $('stat-target');
-const statPasses = $('stat-passes');
-const downloadLinks = $('download-links');
-const dlXlsx = $('dl-xlsx');
-const dlCsv = $('dl-csv');
-const dlJson = $('dl-json');
-const stopBtn = $('stop-btn');
-const stopLabel = $('stop-label');
 
 // Jobs/Grants tab controller
 const tabButtons = Array.from(document.querySelectorAll('.tabbar [role="tab"]'));
@@ -852,169 +1146,339 @@ document.querySelector('.tabbar').addEventListener('keydown', (e) => {
 
 activateTab('jobs');
 
-let eventSource = null;
-let lastCollected = 0;
-let currentRunId = null;
+// Generic extraction-panel controller — wired once for Jobs, once for Grants.
+// `ids` maps each role to a concrete element id; `mode` is sent to /scrape;
+// `noun`/`nouns` drive the status wording ("job"/"jobs", "grant post"/…).
+function wirePanel(cfg) {
+  const form = $(cfg.ids.form);
+  const errorBox = $(cfg.ids.error);
+  const errorText = $(cfg.ids.errorText);
+  const promptEl = $(cfg.ids.prompt);
+  const maxEl = $(cfg.ids.max);
+  const submitBtn = $(cfg.ids.submitBtn);
+  const submitLabel = $(cfg.ids.submitLabel);
+  const progressSection = $(cfg.ids.progress);
+  const progressText = $(cfg.ids.progressText);
+  const progressPct = $(cfg.ids.progressPct);
+  const progressFill = $(cfg.ids.progressFill);
+  const progressDetail = $(cfg.ids.progressDetail);
+  const statCollected = $(cfg.ids.statCollected);
+  const statTarget = $(cfg.ids.statTarget);
+  const statPasses = $(cfg.ids.statPasses);
+  const downloadLinks = $(cfg.ids.downloads);
+  const dlXlsx = $(cfg.ids.dlXlsx);
+  const dlCsv = $(cfg.ids.dlCsv);
+  const dlJson = $(cfg.ids.dlJson);
+  const stopBtn = $(cfg.ids.stopBtn);
+  const stopLabel = $(cfg.ids.stopLabel);
+  const panelRoot = $(cfg.ids.panelRoot);
 
-function showError(msg) { errorText.textContent = msg; errorBox.hidden = false; }
-function hideError() { errorBox.hidden = true; }
+  let eventSource = null;
+  let lastCollected = 0;
+  let currentRunId = null;
 
-// Example prompt chips fill the textarea
-document.querySelectorAll('[data-example]').forEach((el) => {
-  el.addEventListener('click', () => { promptEl.value = el.dataset.example; promptEl.focus(); });
-});
+  const showError = (msg) => { errorText.textContent = msg; errorBox.hidden = false; };
+  const hideError = () => { errorBox.hidden = true; };
 
-// Target-count presets
-const presetEls = document.querySelectorAll('[data-preset]');
-presetEls.forEach((el) => {
-  el.addEventListener('click', () => {
-    maxJobsEl.value = el.dataset.preset;
-    presetEls.forEach((p) => p.classList.toggle('is-active', p === el));
+  // Example prompt chips fill this panel's textarea
+  panelRoot.querySelectorAll('[data-example]').forEach((el) => {
+    el.addEventListener('click', () => { promptEl.value = el.dataset.example; promptEl.focus(); });
   });
-});
-// Keep preset highlight in sync if the user types a custom value
-maxJobsEl.addEventListener('input', () => {
-  presetEls.forEach((p) => p.classList.toggle('is-active', p.dataset.preset === maxJobsEl.value));
-});
 
-function setBusy(busy) {
-  submitBtn.disabled = busy;
-  submitBtn.classList.toggle('is-busy', busy);
-  submitLabel.textContent = busy ? 'Scraping…' : 'Start extraction';
-}
-
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  hideError();
-  const prompt = promptEl.value.trim();
-  const maxJobs = parseInt(maxJobsEl.value, 10) || 100;
-  if (!prompt) { showError('Enter what roles you want to find.'); promptEl.focus(); return; }
-
-  setBusy(true);
-  progressSection.hidden = false;
-  progressSection.dataset.state = 'running';
-  downloadLinks.hidden = true;
-  stopBtn.hidden = true;
-  stopBtn.disabled = false;
-  stopLabel.textContent = 'Stop';
-  currentRunId = null;
-  lastCollected = 0;
-  progressFill.style.width = '0%';
-  progressPct.textContent = '0%';
-  progressText.textContent = 'Parsing your request…';
-  progressDetail.textContent = 'Building a structured search plan from your prompt.';
-  statCollected.textContent = '0';
-  statTarget.textContent = String(maxJobs);
-  statPasses.textContent = '0';
-  progressSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-  try {
-    const res = await fetch('/scrape', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, max_jobs: maxJobs }),
+  // Target-count presets (scoped to this panel)
+  const presetEls = panelRoot.querySelectorAll('[data-preset]');
+  presetEls.forEach((el) => {
+    el.addEventListener('click', () => {
+      maxEl.value = el.dataset.preset;
+      presetEls.forEach((p) => p.classList.toggle('is-active', p === el));
     });
-    const data = await res.json();
-    if (data.error) { showError(data.error); finishReset(); return; }
+  });
+  maxEl.addEventListener('input', () => {
+    presetEls.forEach((p) => p.classList.toggle('is-active', p.dataset.preset === maxEl.value));
+  });
 
-    const runId = data.run_id;
-    currentRunId = runId;
-    dlXlsx.href = `/download/${runId}/xlsx`;
-    dlCsv.href = `/download/${runId}/csv`;
-    dlJson.href = `/download/${runId}/json`;
-    stopBtn.hidden = false;
-
-    eventSource = new EventSource(`/stream/${runId}`);
-    eventSource.onmessage = (event) => {
-      let p;
-      try { p = JSON.parse(event.data); } catch (_) { return; }
-
-      if (p.error) {
-        showError(p.error);
-        progressSection.dataset.state = 'error';
-        progressText.textContent = 'Run failed';
-        finishReset(false);
-        return;
-      }
-
-      if (typeof p.collected === 'number') lastCollected = p.collected;
-
-      // User-requested stop: keep whatever was collected and offer downloads.
-      if (p.status === 'stopped') {
-        const n = (typeof p.collected === 'number') ? p.collected : lastCollected;
-        progressSection.dataset.state = 'stopped';
-        statCollected.textContent = String(n);
-        progressText.textContent = `Stopped — ${n} ${n === 1 ? 'job' : 'jobs'} saved`;
-        progressDetail.textContent = 'Pick a format below to download what was collected.';
-        downloadLinks.hidden = false;
-        stopBtn.hidden = true;
-        if (eventSource) { eventSource.close(); eventSource = null; }
-        setBusy(false);
-        return;
-      }
-
-      const isDone = p.status === 'done'
-        || (typeof p.collected === 'number' && typeof p.target === 'number' && p.collected >= p.target);
-
-      if (isDone) {
-        const n = (typeof p.collected === 'number') ? p.collected : lastCollected;
-        progressFill.style.width = '100%';
-        progressPct.textContent = '100%';
-        progressSection.dataset.state = 'done';
-        statCollected.textContent = String(n);
-        progressText.textContent = `Done — ${n} ${n === 1 ? 'job' : 'jobs'} collected`;
-        progressDetail.textContent = 'Pick a format below to download your results.';
-        downloadLinks.hidden = false;
-        stopBtn.hidden = true;
-        if (eventSource) { eventSource.close(); eventSource = null; }
-        setBusy(false);
-        return;
-      }
-
-      const collected = p.collected || 0;
-      const target = p.target || maxJobs;
-      const pct = target ? Math.min(100, Math.round((collected / target) * 100)) : 0;
-      progressFill.style.width = pct + '%';
-      progressPct.textContent = pct + '%';
-      statCollected.textContent = String(collected);
-      statTarget.textContent = String(target);
-      if (typeof p.attempts === 'number') statPasses.textContent = String(p.attempts);
-      progressText.textContent = `${collected} of ${target} jobs found`;
-      progressDetail.textContent = p.current_query
-        ? `Searching “${p.current_query}” · ${p.current_location || 'anywhere'}`
-        : 'Scanning LinkedIn and scoring relevance…';
-    };
-
-    eventSource.onerror = () => {
-      showError('Connection to the live progress stream was lost.');
-      progressSection.dataset.state = 'error';
-      finishReset(false);
-    };
-  } catch (err) {
-    showError('Could not start the run: ' + err.message);
-    finishReset();
+  function setBusy(busy) {
+    submitBtn.disabled = busy;
+    submitBtn.classList.toggle('is-busy', busy);
+    submitLabel.textContent = busy ? 'Scraping…' : 'Start extraction';
   }
-});
 
-function finishReset(hideProgress = true) {
-  setBusy(false);
-  stopBtn.hidden = true;
-  if (eventSource) { eventSource.close(); eventSource = null; }
-  if (hideProgress) { progressSection.hidden = true; progressSection.removeAttribute('data-state'); }
+  function finishReset(hideProgress = true) {
+    setBusy(false);
+    stopBtn.hidden = true;
+    if (eventSource) { eventSource.close(); eventSource = null; }
+    if (hideProgress) { progressSection.hidden = true; progressSection.removeAttribute('data-state'); }
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideError();
+    const prompt = promptEl.value.trim();
+    const maxItems = parseInt(maxEl.value, 10) || cfg.defaultTarget;
+    if (!prompt) { showError(cfg.emptyPromptMsg); promptEl.focus(); return; }
+
+    setBusy(true);
+    progressSection.hidden = false;
+    progressSection.dataset.state = 'running';
+    downloadLinks.hidden = true;
+    stopBtn.hidden = true;
+    stopBtn.disabled = false;
+    stopLabel.textContent = 'Stop';
+    currentRunId = null;
+    lastCollected = 0;
+    progressFill.style.width = '0%';
+    progressPct.textContent = '0%';
+    progressText.textContent = 'Parsing your request…';
+    progressDetail.textContent = cfg.planningMsg;
+    statCollected.textContent = '0';
+    statTarget.textContent = String(maxItems);
+    statPasses.textContent = '0';
+    progressSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    try {
+      const res = await fetch('/scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, max_jobs: maxItems, mode: cfg.mode }),
+      });
+      if (res.status === 401) { location.href = '/login'; return; }
+      const data = await res.json();
+      if (data.error) { showError(data.error); finishReset(); return; }
+
+      const runId = data.run_id;
+      currentRunId = runId;
+      dlXlsx.href = `/download/${runId}/xlsx`;
+      dlCsv.href = `/download/${runId}/csv`;
+      dlJson.href = `/download/${runId}/json`;
+      stopBtn.hidden = false;
+
+      eventSource = new EventSource(`/stream/${runId}`);
+      eventSource.onmessage = (event) => {
+        let p;
+        try { p = JSON.parse(event.data); } catch (_) { return; }
+
+        if (p.error) {
+          showError(p.error);
+          progressSection.dataset.state = 'error';
+          progressText.textContent = 'Run failed';
+          finishReset(false);
+          return;
+        }
+
+        if (typeof p.collected === 'number') lastCollected = p.collected;
+
+        // User-requested stop: keep whatever was collected and offer downloads.
+        if (p.status === 'stopped') {
+          const n = (typeof p.collected === 'number') ? p.collected : lastCollected;
+          progressSection.dataset.state = 'stopped';
+          statCollected.textContent = String(n);
+          progressText.textContent = `Stopped — ${n} ${n === 1 ? cfg.noun : cfg.nouns} saved`;
+          progressDetail.textContent = 'Pick a format below to download what was collected.';
+          downloadLinks.hidden = false;
+          stopBtn.hidden = true;
+          if (eventSource) { eventSource.close(); eventSource = null; }
+          setBusy(false);
+          return;
+        }
+
+        const isDone = p.status === 'done'
+          || (typeof p.collected === 'number' && typeof p.target === 'number' && p.collected >= p.target);
+
+        if (isDone) {
+          const n = (typeof p.collected === 'number') ? p.collected : lastCollected;
+          progressFill.style.width = '100%';
+          progressPct.textContent = '100%';
+          progressSection.dataset.state = 'done';
+          statCollected.textContent = String(n);
+          progressText.textContent = `Done — ${n} ${n === 1 ? cfg.noun : cfg.nouns} collected`;
+          progressDetail.textContent = 'Pick a format below to download your results.';
+          downloadLinks.hidden = false;
+          stopBtn.hidden = true;
+          if (eventSource) { eventSource.close(); eventSource = null; }
+          setBusy(false);
+          return;
+        }
+
+        const collected = p.collected || 0;
+        const target = p.target || maxItems;
+        const pct = target ? Math.min(100, Math.round((collected / target) * 100)) : 0;
+        progressFill.style.width = pct + '%';
+        progressPct.textContent = pct + '%';
+        statCollected.textContent = String(collected);
+        statTarget.textContent = String(target);
+        if (typeof p.attempts === 'number') statPasses.textContent = String(p.attempts);
+        progressText.textContent = `${collected} of ${target} ${cfg.nouns} found`;
+        progressDetail.textContent = p.current_query
+          ? `Searching “${p.current_query}”${p.current_location ? ' · ' + p.current_location : ''}`
+          : cfg.scanningMsg;
+      };
+
+      eventSource.onerror = () => {
+        showError('Connection to the live progress stream was lost.');
+        progressSection.dataset.state = 'error';
+        finishReset(false);
+      };
+    } catch (err) {
+      showError('Could not start the run: ' + err.message);
+      finishReset();
+    }
+  });
+
+  // Stop button: ask the server to halt the run; collected items stay downloadable.
+  stopBtn.addEventListener('click', async () => {
+    if (!currentRunId) return;
+    stopBtn.disabled = true;
+    stopLabel.textContent = 'Stopping…';
+    progressDetail.textContent = 'Stopping — saving everything collected so far…';
+    try {
+      await fetch(`/stop/${currentRunId}`, { method: 'POST' });
+    } catch (_) {
+      // Even if this request fails, the run will end and the stream resolves the UI.
+    }
+  });
 }
 
-// Stop button: ask the server to halt the run; collected jobs stay downloadable.
-stopBtn.addEventListener('click', async () => {
-  if (!currentRunId) return;
-  stopBtn.disabled = true;
-  stopLabel.textContent = 'Stopping…';
-  progressDetail.textContent = 'Stopping — saving the jobs collected so far…';
-  try {
-    await fetch(`/stop/${currentRunId}`, { method: 'POST' });
-  } catch (_) {
-    // Even if this request fails, the run will end and the stream resolves the UI.
-  }
+wirePanel({
+  mode: 'jobs',
+  noun: 'job',
+  nouns: 'jobs',
+  defaultTarget: 100,
+  emptyPromptMsg: 'Enter what roles you want to find.',
+  planningMsg: 'Building a structured search plan from your prompt.',
+  scanningMsg: 'Scanning LinkedIn and scoring relevance…',
+  ids: {
+    panelRoot: 'panel-jobs',
+    form: 'scrape-form', error: 'error', errorText: 'error-text',
+    prompt: 'prompt', max: 'max-jobs',
+    submitBtn: 'submit-btn', submitLabel: 'submit-label',
+    progress: 'progress', progressText: 'progress-text', progressPct: 'progress-pct',
+    progressFill: 'progress-fill', progressDetail: 'progress-detail',
+    statCollected: 'stat-collected', statTarget: 'stat-target', statPasses: 'stat-passes',
+    downloads: 'download-links', dlXlsx: 'dl-xlsx', dlCsv: 'dl-csv', dlJson: 'dl-json',
+    stopBtn: 'stop-btn', stopLabel: 'stop-label',
+  },
 });
+
+wirePanel({
+  mode: 'grants',
+  noun: 'grant post',
+  nouns: 'grant posts',
+  defaultTarget: 50,
+  emptyPromptMsg: 'Describe the funding opportunities you want to find.',
+  planningMsg: 'Planning LinkedIn post searches for funding opportunities.',
+  scanningMsg: 'Reading posts, images and linked sites for funding details…',
+  ids: {
+    panelRoot: 'panel-grants',
+    form: 'g-scrape-form', error: 'g-error', errorText: 'g-error-text',
+    prompt: 'g-prompt', max: 'g-max',
+    submitBtn: 'g-submit-btn', submitLabel: 'g-submit-label',
+    progress: 'g-progress', progressText: 'g-progress-text', progressPct: 'g-progress-pct',
+    progressFill: 'g-progress-fill', progressDetail: 'g-progress-detail',
+    statCollected: 'g-stat-collected', statTarget: 'g-stat-target', statPasses: 'g-stat-passes',
+    downloads: 'g-download-links', dlXlsx: 'g-dl-xlsx', dlCsv: 'g-dl-csv', dlJson: 'g-dl-json',
+    stopBtn: 'g-stop-btn', stopLabel: 'g-stop-label',
+  },
+});
+
+// ---------- Admin: user management modal ----------
+const usersModal = $('users-modal');
+if (usersModal) {
+  const openBtn = $('manage-users-btn');
+  const closeBtn = $('users-modal-close');
+  const addForm = $('add-user-form');
+  const addBtn = $('add-user-btn');
+  const addMsg = $('add-user-msg');
+  const listBody = $('user-list-body');
+
+  function setMsg(text, ok) {
+    addMsg.textContent = text;
+    addMsg.className = 'modal__msg ' + (ok ? 'ok' : 'err');
+  }
+
+  async function refreshUsers() {
+    listBody.innerHTML = '<div class="user-list__empty">Loading…</div>';
+    try {
+      const res = await fetch('/admin/users');
+      const data = await res.json();
+      if (!res.ok) { listBody.innerHTML = `<div class="user-list__empty">${data.error || 'Failed to load users.'}</div>`; return; }
+      if (!data.users.length) {
+        listBody.innerHTML = '<div class="user-list__empty">No users yet — add the first one above.</div>';
+        return;
+      }
+      listBody.innerHTML = '';
+      data.users.forEach((u) => {
+        const row = document.createElement('div');
+        row.className = 'user-row';
+        const meta = document.createElement('div');
+        meta.className = 'user-row__meta';
+        const nm = document.createElement('div');
+        nm.className = 'user-row__name';
+        nm.textContent = u.name;
+        const em = document.createElement('div');
+        em.className = 'user-row__email';
+        em.textContent = u.email;
+        meta.appendChild(nm); meta.appendChild(em);
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'user-del';
+        del.textContent = 'Delete';
+        del.addEventListener('click', async () => {
+          if (!confirm(`Delete user ${u.name} (${u.email})? They will no longer be able to sign in.`)) return;
+          del.disabled = true;
+          try {
+            const r = await fetch(`/admin/users/${u.id}`, { method: 'DELETE' });
+            if (r.ok) { row.remove(); setMsg(`Deleted ${u.email}.`, true); }
+            else { const d = await r.json(); setMsg(d.error || 'Delete failed.', false); del.disabled = false; }
+          } catch (err) { setMsg('Delete failed: ' + err.message, false); del.disabled = false; }
+        });
+        row.appendChild(meta); row.appendChild(del);
+        listBody.appendChild(row);
+      });
+    } catch (err) {
+      listBody.innerHTML = '<div class="user-list__empty">Could not reach the server.</div>';
+    }
+  }
+
+  openBtn.addEventListener('click', () => {
+    usersModal.hidden = false;
+    setMsg('', true);
+    refreshUsers();
+  });
+  closeBtn.addEventListener('click', () => { usersModal.hidden = true; });
+  usersModal.addEventListener('click', (e) => { if (e.target === usersModal) usersModal.hidden = true; });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') usersModal.hidden = true; });
+
+  addForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('new-user-name').value.trim();
+    const email = $('new-user-email').value.trim();
+    const password = $('new-user-password').value;
+    if (!name || !email || !password) { setMsg('Fill in name, email and password.', false); return; }
+    addBtn.disabled = true;
+    addBtn.textContent = 'Adding…';
+    try {
+      const res = await fetch('/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setMsg(data.emailed
+          ? `User added — credentials emailed to ${email}.`
+          : `User added. Email could not be sent — share the password with them manually.`, true);
+        addForm.reset();
+        refreshUsers();
+      } else {
+        setMsg(data.error || 'Could not add the user.', false);
+      }
+    } catch (err) {
+      setMsg('Could not add the user: ' + err.message, false);
+    }
+    addBtn.disabled = false;
+    addBtn.textContent = 'Add user';
+  });
+}
 </script>
 </body>
 </html>

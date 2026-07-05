@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — Tamuku</title>
+  <meta name="theme-color" content="#FBF6EC">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23FF6B00'/%3E%3Cpath d='M6 20c6-9 14-9 20-7-5-1-10 1-14 8z' fill='%23fff'/%3E%3Ccircle cx='22.5' cy='10.5' r='2.4' fill='%231A1A2E'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: light;
+      --white: #FFFFFF;
+      --cream: #FBF6EC;
+      --peach: #FCE4D6;
+      --peach-2: #FBE0D0;
+      --gray-100: #F0F0F0;
+      --gray-200: #E8E8E8;
+      --line: #ECDFCF;
+      --line-strong: #F0C4A8;
+      --text: #1A1A2E;
+      --text-soft: #4A4A5E;
+      --text-faint: #8A8597;
+      --accent: #FF6B00;
+      --accent-hover: #E85F00;
+      --accent-deep: #F5750C;
+      --danger: #D64545;
+      --font-display: 'Poppins', system-ui, -apple-system, sans-serif;
+      --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+      --r-sm: 12px;
+      --r-lg: 24px;
+      --shadow: 0 30px 70px -34px rgba(245, 117, 12, 0.22), 0 10px 30px -18px rgba(26, 26, 46, 0.10);
+      --ring: 0 0 0 3px rgba(255, 107, 0, 0.25);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100dvh;
+      font-family: var(--font-body);
+      color: var(--text);
+      background: var(--gray-100);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.55;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(900px 600px at 85% -10%, rgba(255, 107, 0, 0.10), transparent 60%),
+        radial-gradient(720px 540px at 6% 102%, rgba(252, 228, 214, 0.55), transparent 55%),
+        linear-gradient(180deg, #FFFFFF, var(--gray-100) 82%);
+    }
+    .card {
+      position: relative;
+      width: min(420px, 100%);
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow);
+      padding: clamp(1.8rem, 5vw, 2.6rem);
+      animation: fade-up 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    @keyframes fade-up {
+      from { opacity: 0; transform: translateY(14px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .brand { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1.6rem; }
+    .brand__name {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1.4rem;
+      letter-spacing: -0.02em;
+      color: var(--accent);
+    }
+    .brand__tag {
+      font-size: 0.7rem;
+      color: var(--text-faint);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding-left: 0.7rem;
+      border-left: 1px solid var(--line-strong);
+    }
+    h1 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 1.3rem;
+      letter-spacing: -0.01em;
+      margin-bottom: 0.3rem;
+    }
+    .sub { font-size: 0.86rem; color: var(--text-faint); margin-bottom: 1.5rem; }
+    form { display: grid; gap: 1rem; }
+    label {
+      display: grid;
+      gap: 0.45rem;
+      font-family: var(--font-display);
+      font-size: 0.82rem;
+      font-weight: 500;
+    }
+    input {
+      width: 100%;
+      padding: 0.8rem 1rem;
+      font-family: inherit;
+      font-size: 0.95rem;
+      color: var(--text);
+      background: var(--white);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--r-sm);
+      transition: border-color 160ms, box-shadow 160ms;
+    }
+    input:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+    .error-box {
+      display: none;
+      padding: 0.75rem 1rem;
+      border-radius: var(--r-sm);
+      background: #FDECEC;
+      border: 1px solid #F3B4B4;
+      color: #B3261E;
+      font-size: 0.86rem;
+    }
+    .error-box.show { display: block; }
+    button[type="submit"] {
+      margin-top: 0.3rem;
+      border: none;
+      border-radius: 999px;
+      padding: 0.9rem 1.5rem;
+      font-family: var(--font-display);
+      font-size: 0.96rem;
+      font-weight: 600;
+      color: #fff;
+      background: var(--accent);
+      cursor: pointer;
+      transition: background 160ms, transform 140ms, filter 140ms;
+    }
+    button[type="submit"]:hover { background: var(--accent-hover); transform: translateY(-2px); }
+    button[type="submit"]:active { transform: translateY(0) scale(0.985); }
+    button[type="submit"]:focus-visible { outline: none; box-shadow: var(--ring); }
+    button[type="submit"]:disabled { cursor: progress; filter: saturate(0.7) brightness(0.96); transform: none; }
+    .foot { margin-top: 1.4rem; font-size: 0.76rem; color: var(--text-faint); text-align: center; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">
+      <span class="brand__name">Tamuku</span>
+      <span class="brand__tag">Job &amp; grants engine</span>
+    </div>
+    <h1>Sign in</h1>
+    <p class="sub">Use the credentials you were given by your administrator.</p>
+
+    <div id="error" class="error-box" role="alert"></div>
+
+    <form id="login-form" novalidate>
+      <label>Email
+        <input type="email" id="email" name="email" autocomplete="username" required
+               placeholder="you@example.org">
+      </label>
+      <label>Password
+        <input type="password" id="password" name="password" autocomplete="current-password" required
+               placeholder="••••••••">
+      </label>
+      <button type="submit" id="submit-btn">Sign in</button>
+    </form>
+
+    <p class="foot">Access is managed by the portal administrator.</p>
+  </main>
+
+<script>
+const form = document.getElementById('login-form');
+const errorBox = document.getElementById('error');
+const submitBtn = document.getElementById('submit-btn');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  errorBox.classList.remove('show');
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  if (!email || !password) {
+    errorBox.textContent = 'Enter your email and password.';
+    errorBox.classList.add('show');
+    return;
+  }
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Signing in…';
+  try {
+    const res = await fetch('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      const params = new URLSearchParams(location.search);
+      location.href = params.get('next') || '/';
+      return;
+    }
+    errorBox.textContent = data.error || 'Sign-in failed.';
+    errorBox.classList.add('show');
+  } catch (err) {
+    errorBox.textContent = 'Could not reach the server: ' + err.message;
+    errorBox.classList.add('show');
+  }
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Sign in';
+});
+</script>
+</body>
+</html>
