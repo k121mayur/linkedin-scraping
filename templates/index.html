@@ -194,6 +194,34 @@
       100% { box-shadow: 0 0 0 0 rgba(31, 157, 85, 0); }
     }
 
+    /* ---------- Tab nav ---------- */
+    .tabbar {
+      display: flex;
+      gap: 0.3rem;
+      width: fit-content;
+      margin: 0 auto clamp(1rem, 2.5vw, 1.75rem);
+      padding: 0.3rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--white);
+      flex-shrink: 0;
+    }
+    .tab {
+      font-family: var(--font-display);
+      font-weight: 500;
+      font-size: 0.85rem;
+      color: var(--text-soft);
+      padding: 0.5rem 1.35rem;
+      border: none;
+      border-radius: 999px;
+      background: transparent;
+      cursor: pointer;
+      transition: color 150ms ease, background 150ms ease;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.is-active { color: #fff; background: var(--accent); }
+    .tab:focus-visible { outline: none; box-shadow: var(--ring); }
+
     /* ---------- Hero ---------- */
     main.shell {
       flex: 1;
@@ -633,8 +661,13 @@
         <span class="status-pill"><span class="status-dot" aria-hidden="true"></span> Engine online</span>
       </header>
 
+      <nav class="tabbar reveal" role="tablist" aria-label="Extraction mode">
+        <button type="button" class="tab is-active" id="tab-jobs" data-tab="jobs" role="tab" aria-selected="true" aria-controls="panel-jobs">Jobs</button>
+        <button type="button" class="tab" id="tab-grants" data-tab="grants" role="tab" aria-selected="false" aria-controls="panel-grants" tabindex="-1">Grants</button>
+      </nav>
+
       <main class="shell" style="padding:0">
-        <div class="hero">
+        <div class="hero" id="panel-jobs" data-tab-panel="jobs" role="tabpanel" aria-labelledby="tab-jobs">
 
           <!-- Minimal intro — everything points to the panel below -->
           <section class="intro reveal d1" aria-labelledby="headline">
@@ -740,6 +773,14 @@
           </section>
 
         </div>
+
+        <div class="hero" id="panel-grants" data-tab-panel="grants" role="tabpanel" aria-labelledby="tab-grants" hidden>
+          <section class="intro reveal d1" aria-labelledby="grants-headline">
+            <span class="eyebrow"><b>AI</b> Prompt-driven extraction</span>
+            <h1 id="grants-headline">Grants content will render here.</h1>
+            <p>The Grants extraction panel is built out in the next task.</p>
+          </section>
+        </div>
       </main>
 
       <footer class="reveal d4">
@@ -777,6 +818,39 @@ const dlCsv = $('dl-csv');
 const dlJson = $('dl-json');
 const stopBtn = $('stop-btn');
 const stopLabel = $('stop-label');
+
+// Jobs/Grants tab controller
+const tabButtons = Array.from(document.querySelectorAll('.tabbar [role="tab"]'));
+const tabPanels = { jobs: $('panel-jobs'), grants: $('panel-grants') };
+let activeTab = 'jobs';
+
+function activateTab(name) {
+  activeTab = name;
+  tabButtons.forEach((btn) => {
+    const isActive = btn.dataset.tab === name;
+    btn.setAttribute('aria-selected', String(isActive));
+    btn.tabIndex = isActive ? 0 : -1;
+    btn.classList.toggle('is-active', isActive);
+  });
+  Object.entries(tabPanels).forEach(([key, el]) => { el.hidden = key !== name; });
+}
+
+tabButtons.forEach((btn) => {
+  btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+});
+
+document.querySelector('.tabbar').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  e.preventDefault();
+  const idx = tabButtons.findIndex((b) => b.dataset.tab === activeTab);
+  const next = e.key === 'ArrowRight'
+    ? (idx + 1) % tabButtons.length
+    : (idx - 1 + tabButtons.length) % tabButtons.length;
+  tabButtons[next].focus();
+  activateTab(tabButtons[next].dataset.tab);
+});
+
+activateTab('jobs');
 
 let eventSource = null;
 let lastCollected = 0;
