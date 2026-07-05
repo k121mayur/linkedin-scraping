@@ -49,7 +49,21 @@ Thumbs.db
 # Hermes
 .hermes/
 
-# Docs (keep README for reference, skip plan files)
-PLAN.md
-TASKS.md
-AI_SCRAPER_PLAN.md
+# Agent/tooling state
+.claude/
+.superpowers/
+
+# Node artifacts (no JS build in this project)
+node_modules/
+package-lock.json
+
+# Docs (not needed inside the image)
+docs/
+CLAUDE.md
+README.md
+
+# Docker files themselves (not needed inside the image)
+Dockerfile
+docker-compose.yml
+.dockerignore
+run.sh

@@ -1,26 +1,33 @@
-# Playwright's official Python image ships Chromium + all OS deps preinstalled.
-# Keep this tag in lockstep with the pinned `playwright==1.48.0` in
-# requirements.txt — a mismatch makes the browser fail to launch at runtime.
-FROM mcr.microsoft.com/playwright/python:v1.48.0-focal
+# syntax=docker/dockerfile:1
+# Slim Python base (~45 MB) + Chromium-only Playwright install (~350 MB total
+# download) instead of the 2 GB+ mcr.microsoft.com/playwright image that ships
+# all three browsers. On a slow connection this is the difference between
+# ~40 minutes and a few minutes — and it only happens once: every later build
+# reuses the cached layers and finishes in seconds.
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
     PORT=5000 \
     DRY_RUN=false \
-    PLAYWRIGHT_HEADLESS=true
+    PLAYWRIGHT_HEADLESS=true \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Install Python dependencies first (layer caching).
+# Python dependencies first (layer caching). The BuildKit cache mount keeps
+# downloaded wheels across builds, so a requirements.txt tweak doesn't
+# re-download pandas & co.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --retries 10 --timeout 60 -r requirements.txt
 
-# Guarantee the Chromium build matching the pinned Playwright client is present,
-# even if the base image drifts. No-op/fast when already baked into the image.
-RUN python -m playwright install chromium
+# Chromium only (no firefox/webkit) + the exact OS libs it needs.
+# This layer is cached until requirements.txt changes — code edits never rerun it.
+RUN python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy application code.
+# Copy application code last — day-to-day rebuilds only redo this layer.
 COPY . .
 
 # Data dir for jobs.db + exports (also a sensible volume mount point).
