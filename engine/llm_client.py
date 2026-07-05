@@ -197,6 +197,95 @@ def _extract_json(text: str):
     raise ValueError("No parseable JSON found in model response")
 
 
+def _vision_openai(prompt: str, images_b64: list[str], temperature: float) -> str:
+    content = [{"type": "text", "text": prompt}]
+    for b64 in images_b64:
+        content.append({"type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+    body = json.dumps({
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": content}],
+        "temperature": temperature,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {LLM_API_KEY}",
+            "User-Agent": _USER_AGENT,
+        },
+    )
+    data = _urlopen_json(req, timeout=180)
+    return data["choices"][0]["message"]["content"]
+
+
+def _vision_ollama(prompt: str, images_b64: list[str], temperature: float) -> str:
+    # Ollama multimodal: base64 images ride on the user message's "images" field.
+    base = LLM_BASE_URL.rstrip("/")
+    body = json.dumps({
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": prompt, "images": images_b64}],
+        "stream": False,
+        "think": False,
+        "options": {"temperature": temperature},
+    }).encode()
+    headers = {"Content-Type": "application/json", "User-Agent": _USER_AGENT}
+    if _is_real_key(LLM_API_KEY):
+        headers["x-api-key"] = LLM_API_KEY
+    req = urllib.request.Request(f"{base}/api/chat", data=body, headers=headers)
+    data = _urlopen_json(req, timeout=240)
+    return data.get("message", {}).get("content", "")
+
+
+def _vision_anthropic(prompt: str, images_b64: list[str], temperature: float) -> str:
+    content = []
+    for b64 in images_b64:
+        content.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
+        })
+    content.append({"type": "text", "text": prompt})
+    body = json.dumps({
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": content}],
+        "max_tokens": 4096,
+        "temperature": temperature,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": LLM_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "User-Agent": _USER_AGENT,
+        },
+    )
+    data = _urlopen_json(req, timeout=180)
+    return data["content"][0]["text"]
+
+
+_VISION_PROVIDERS = {
+    "openai": _vision_openai,
+    "ollama": _vision_ollama,
+    "anthropic": _vision_anthropic,
+}
+
+
+def chat_vision(prompt: str, images_b64: list[str], temperature: float = 0.1) -> str:
+    """Send text + base64 JPEG/PNG images to the model; return the text answer.
+
+    Used to read text out of images attached to LinkedIn posts. Raises on
+    provider/network failure — callers wrap this in try/except like every
+    other LLM boundary.
+    """
+    caller = _VISION_PROVIDERS.get(LLM_PROVIDER)
+    if caller is None:
+        raise ValueError(f"Unsupported LLM_PROVIDER for vision: {LLM_PROVIDER}")
+    return caller(prompt, images_b64, temperature)
+
+
 def chat_json(prompt: str, system: Optional[str] = None, temperature: float = 0.1):
     """Send a chat request and return parsed JSON (object or list).
 
