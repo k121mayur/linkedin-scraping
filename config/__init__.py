@@ -56,13 +56,13 @@ GMAIL_POLL_INTERVAL = float(os.getenv("GMAIL_POLL_INTERVAL", "8"))
 GMAIL_POLL_TIMEOUT = float(os.getenv("GMAIL_POLL_TIMEOUT", "180"))
 
 # --- Grants (LinkedIn posts) extraction ---
-MAX_GRANT_POSTS_DEFAULT = int(os.getenv("MAX_GRANT_POSTS_DEFAULT", "50"))
+MAX_GRANT_POSTS_DEFAULT = int(os.getenv("MAX_GRANT_POSTS_DEFAULT", "10"))
 MAX_POST_SEARCH_PAGES = int(os.getenv("MAX_POST_SEARCH_PAGES", "5"))       # content-search pages per keyword
 GRANT_ANALYZE_IMAGES = os.getenv("GRANT_ANALYZE_IMAGES", "true").lower() not in {"false", "0", "no"}
 GRANT_FOLLOW_LINKS = os.getenv("GRANT_FOLLOW_LINKS", "true").lower() not in {"false", "0", "no"}
 GRANT_MAX_LINKS_PER_POST = int(os.getenv("GRANT_MAX_LINKS_PER_POST", "2"))  # external sites fetched per post
 GRANT_MAX_IMAGES_PER_POST = int(os.getenv("GRANT_MAX_IMAGES_PER_POST", "2"))
-GRANT_RELEVANCE_THRESHOLD = float(os.getenv("GRANT_RELEVANCE_THRESHOLD", "0.5"))
+GRANT_RELEVANCE_THRESHOLD = float(os.getenv("GRANT_RELEVANCE_THRESHOLD", "0.7"))
 
 # --- Auth / role-based access ---
 # The admin account is hardcoded (overridable via env). Regular users live in
