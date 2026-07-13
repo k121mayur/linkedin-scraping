@@ -150,7 +150,7 @@ def admin_delete_user(user_id: int):
 
 # ── scraping ─────────────────────────────────────────────────
 
-def _scrape_worker(run_id: int, prompt: str, max_items: int, mode: str):
+def _scrape_worker(run_id: int, prompt: str, max_items: int, mode: str, profile: str = ""):
     """Background thread that runs the selected pipeline and pushes progress."""
     q = queue.Queue()
     _progress_queues[run_id] = q
@@ -159,7 +159,8 @@ def _scrape_worker(run_id: int, prompt: str, max_items: int, mode: str):
     try:
         if mode == "grants":
             pipeline = run_grants_pipeline(prompt, max_items, run_id,
-                                           should_stop=stop_event.is_set)
+                                           should_stop=stop_event.is_set,
+                                           profile=profile)
         else:
             parsed = parse(prompt, max_items)
             pipeline = run_jobs_pipeline(prompt, parsed, max_items, run_id,
@@ -189,13 +190,15 @@ def scrape():
     prompt = data.get("prompt", "").strip()
     max_items = int(data.get("max_jobs", 50))
     mode = data.get("mode", "jobs")
+    # Organisation profile — optional, grants mode only. Plain text / markdown.
+    profile = (data.get("profile") or "").strip()
     if mode not in ("jobs", "grants"):
         return jsonify({"error": f"unknown mode: {mode}"}), 400
     if not prompt:
         return jsonify({"error": "prompt is required"}), 400
 
     run_id = db.create_run(prompt, max_items, run_type=mode)
-    threading.Thread(target=_scrape_worker, args=(run_id, prompt, max_items, mode),
+    threading.Thread(target=_scrape_worker, args=(run_id, prompt, max_items, mode, profile),
                      daemon=True).start()
     return jsonify({"run_id": run_id, "status": "started", "mode": mode})
 
