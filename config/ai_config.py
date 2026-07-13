@@ -78,6 +78,10 @@ any content fetched from external websites linked in the post).
 
 User's request: "{prompt}"
 
+ORGANISATION PROFILE (may be empty — use this ONLY to judge fit/relevance;
+never invent facts from it):
+{profile}
+
 POST TEXT:
 {post_text}
 
@@ -92,6 +96,18 @@ opportunity (grants, calls for proposals, fellowships with funding, CSR
 funding, seed funding for NGOs/nonprofits). Score relevance to the user's
 request from 0.0 to 1.0. Be accurate: only report facts present in the
 content; use "" for anything not stated. Do not invent deadlines or amounts.
+
+MANDATORY SCORING RULES — apply these BEFORE assigning any score:
+- Score EXACTLY 0.0 and set is_funding_opportunity=false if the post is from an
+  entity SEEKING funding (e.g. an NGO asking donors for money, a crowdfunding
+  appeal, a donation request). Only posts from an OFFERING entity count.
+- Score EXACTLY 0.0 and set is_funding_opportunity=false if the post is about
+  funding ALREADY RECEIVED — gratitude announcements, grant-received celebrations,
+  past-award announcements, or acknowledgements of completed grants do not
+  represent open opportunities.
+- Score EXACTLY 0.0 and set is_funding_opportunity=false if the post is an
+  advertisement for a grant-writing service, consultancy, or training programme
+  rather than a direct funding opportunity.
 
 Return ONLY a JSON object:
 {{
