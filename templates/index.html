@@ -1007,10 +1007,10 @@
                 <div class="count-field">
                   <span class="field__label">Target post count</span>
                   <div class="count-row">
-                    <input type="number" id="g-max" name="max_jobs" value="50" min="5" max="500" aria-label="Target grant post count">
+                    <input type="number" id="g-max" name="max_jobs" value="10" min="5" max="500" aria-label="Target grant post count">
+                    <button type="button" class="preset is-active" data-preset-for="g-max" data-preset="10">10</button>
                     <button type="button" class="preset" data-preset-for="g-max" data-preset="25">25</button>
-                    <button type="button" class="preset is-active" data-preset-for="g-max" data-preset="50">50</button>
-                    <button type="button" class="preset" data-preset-for="g-max" data-preset="100">100</button>
+                    <button type="button" class="preset" data-preset-for="g-max" data-preset="50">50</button>
                   </div>
                 </div>
                 <button type="submit" id="g-submit-btn" class="submit">
@@ -1239,7 +1239,8 @@ function wirePanel(cfg) {
       const res = await fetch('/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, max_jobs: maxItems, mode: cfg.mode }),
+        body: JSON.stringify({ prompt, max_jobs: maxItems, mode: cfg.mode,
+                               ...(cfg.getProfile ? { profile: cfg.getProfile() } : {}) }),
       });
       if (res.status === 401) { location.href = '/login'; return; }
       const data = await res.json();
@@ -1363,7 +1364,7 @@ wirePanel({
   mode: 'grants',
   noun: 'grant post',
   nouns: 'grant posts',
-  defaultTarget: 50,
+  defaultTarget: 10,
   emptyPromptMsg: 'Describe the funding opportunities you want to find.',
   planningMsg: 'Planning LinkedIn post searches for funding opportunities.',
   scanningMsg: 'Reading posts, images and linked sites for funding details…',
