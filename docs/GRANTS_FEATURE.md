@@ -12,7 +12,8 @@ NGOs constantly need funding. Funders (foundations, CSR teams, fellowship
 programs) often announce their grants **as ordinary LinkedIn posts** — not on
 job boards, not on grant portals. These posts are easy to miss.
 
-The Grants tab automates finding them. You type a plain-English request like:
+The Grants tab automates finding them. You upload an **organisation profile**
+(.txt or .docx) and type a plain-English request like:
 
 > "Grant funding opportunities for NGOs working in education across India"
 
@@ -26,7 +27,7 @@ a clean Excel/CSV/JSON file.
 ## 2. The flow, step by step
 
 ```
-Your prompt
+Your prompt + (Optional) Organisation Profile
    │
    ▼
 ① Keyword planning (AI)
@@ -110,11 +111,16 @@ reached, the run simply continues with what it has.
 ### ⑤ AI analysis — `analyze_post()`
 
 Everything gathered for one post — **post text + image text + website text** —
-is sent to the AI with one strict instruction: decide whether this is a *real,
-actionable* funding opportunity, score how relevant it is to your prompt
-(0.0–1.0), and extract only facts that are **actually stated** (no guessing,
-no invented deadlines). Posts that aren't funding opportunities, or score below
-the threshold (default 0.5), are dropped.
+along with your **organisation profile** (if uploaded), is sent to the AI with
+one strict instruction: decide whether this is a *real, actionable* funding
+opportunity, score how relevant it is to your prompt and profile (0.0–1.0), and
+extract only facts that are **actually stated** (no guessing, no invented
+deadlines).
+
+The AI is also given explicit rules to score 0.0 if the post is from an entity
+*seeking* funds, a gratitude/past-award announcement, or a grant-writing service.
+Posts that aren't funding opportunities, or score below the threshold (default 0.7),
+are dropped.
 
 If the AI fails mid-run, a keyword-based fallback still detects funding terms
 and extracts emails/deadlines/links with patterns — the run never crashes.
@@ -123,8 +129,12 @@ and extracts emails/deadlines/links with patterns — the run never crashes.
 
 Each accepted opportunity is written immediately to the `grants` table in
 SQLite. The web page shows live progress (Collected / Target / Passes) through
-the same streaming mechanism as the Jobs tab, and the **Stop** button works the
-same way: everything collected so far stays saved and downloadable.
+the same streaming mechanism as the Jobs tab.
+
+To prevent infinite loops when results are scarce, the grants run has a hard
+**8-minute wall-clock timeout**. If it hits this cap, it stops gracefully and
+saves everything collected so far. The **Stop** button works the same way:
+everything collected so far stays saved and downloadable.
 
 ### ⑦ Download — the Excel columns
 
@@ -179,7 +189,8 @@ told not to invent anything.
 | `GRANT_FOLLOW_LINKS` | `true` | Fetch external websites linked in posts |
 | `GRANT_MAX_IMAGES_PER_POST` | `2` | Images analyzed per post |
 | `GRANT_MAX_LINKS_PER_POST` | `2` | External sites fetched per post |
-| `GRANT_RELEVANCE_THRESHOLD` | `0.5` | Minimum score to keep a post |
+| `GRANT_RELEVANCE_THRESHOLD` | `0.7` | Minimum score to keep a post |
+| `MAX_GRANT_POSTS_DEFAULT` | `10` | Default target quota for grants |
 | `MAX_POST_SEARCH_PAGES` | `5` | Search pages per keyword |
 
 ## 5. Good to know
