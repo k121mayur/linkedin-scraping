@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 
@@ -39,6 +40,13 @@ def _log(msg: str) -> None:
 
 
 # ── keyword planning ─────────────────────────────────────────
+
+# Hard wall-clock cap for a single grants run — mirrors the max_attempts=40
+# integer cap in self_refinement.py but expressed as elapsed seconds so
+# a run with many keywords and slow LLM calls still terminates predictably.
+# 8 minutes matches the spec's mitigation-table value.
+_GRANTS_MAX_RUN_SECONDS = 480
+
 
 _DEFAULT_KEYWORDS = [
     "grant opportunity NGO",
@@ -180,7 +188,7 @@ _DEADLINE_RE = re.compile(
     r"([A-Za-z0-9 ,/-]{4,40}?)(?:\.|\n|$)", re.IGNORECASE)
 
 
-def _heuristic_analysis(full_text: str, prompt: str) -> dict:
+def _heuristic_analysis(full_text: str, prompt: str, profile: str = "") -> dict:
     """Keyword-based fallback when the LLM is unavailable (or in DRY_RUN)."""
     low = (full_text or "").lower()
     hits = sum(1 for t in _FUNDING_TERMS if t in low)
@@ -207,14 +215,21 @@ def _heuristic_analysis(full_text: str, prompt: str) -> dict:
     }
 
 
-def analyze_post(post_text: str, image_text: str, external_text: str, prompt: str) -> dict:
-    """LLM structured extraction over everything gathered for one post."""
+def analyze_post(post_text: str, image_text: str, external_text: str, prompt: str,
+                 profile: str = "") -> dict:
+    """LLM structured extraction over everything gathered for one post.
+
+    ``profile`` is an optional organisation-profile document (plain text / markdown).
+    When provided it is included in the LLM payload so the model can judge fit;
+    when absent the pipeline behaves exactly as before — strictly additive.
+    """
     combined = "\n".join(filter(None, [post_text, image_text, external_text]))
     if DRY_RUN:
-        return _heuristic_analysis(combined, prompt)
+        return _heuristic_analysis(combined, prompt, profile)
     try:
         result = chat_json(GRANT_ANALYSIS_TEMPLATE.format(
             prompt=prompt,
+            profile=(profile or "")[:4000],
             post_text=(post_text or "")[:6000],
             image_text=(image_text or "")[:3000],
             external_text=(external_text or "")[:6000],
@@ -224,7 +239,7 @@ def analyze_post(post_text: str, image_text: str, external_text: str, prompt: st
             return result
     except Exception as e:
         _log(f"  ! LLM analysis failed, using heuristic: {e}")
-    return _heuristic_analysis(combined, prompt)
+    return _heuristic_analysis(combined, prompt, profile)
 
 
 def read_post_images(image_urls: list[str]) -> str:
@@ -263,8 +278,13 @@ def read_external_sites(post_text: str) -> tuple[str, str]:
 
 # ── orchestrator ─────────────────────────────────────────────
 
-def run(prompt: str, max_posts: int, run_id=None, should_stop=None):
-    """Execute the grants pipeline. Yields Progress, returns the collected list."""
+def run(prompt: str, max_posts: int, run_id=None, should_stop=None, profile: str = ""):
+    """Execute the grants pipeline. Yields Progress, returns the collected list.
+
+    ``profile`` is an optional organisation-profile document forwarded verbatim to
+    ``analyze_post`` for every post in this run. Omitting it keeps behaviour
+    identical to the current production default (prompt-only evaluation).
+    """
     stopped = should_stop if callable(should_stop) else (lambda: False)
 
     if run_id is None:
@@ -281,7 +301,16 @@ def run(prompt: str, max_posts: int, run_id=None, should_stop=None):
 
     user_stopped = False
 
+    timed_out = False
+    run_start = time.monotonic()
+
     for keyword in keywords:
+        elapsed = time.monotonic() - run_start
+        if elapsed >= _GRANTS_MAX_RUN_SECONDS:
+            _log(f"Wall-clock timeout ({_GRANTS_MAX_RUN_SECONDS}s) reached after "
+                 f"{elapsed:.0f}s — stopping gracefully with {len(collected)} result(s).")
+            timed_out = True
+            break
         if len(collected) >= max_posts or stopped():
             user_stopped = stopped()
             break
@@ -321,7 +350,8 @@ def run(prompt: str, max_posts: int, run_id=None, should_stop=None):
             image_text = read_post_images(post.get("image_urls", []))
             external_links, external_text = read_external_sites(post.get("text", ""))
 
-            analysis = analyze_post(post.get("text", ""), image_text, external_text, prompt)
+            analysis = analyze_post(post.get("text", ""), image_text, external_text, prompt,
+                                     profile=profile)
             score = float(analysis.get("relevance_score") or 0.0)
             if not analysis.get("is_funding_opportunity") or score < GRANT_RELEVANCE_THRESHOLD:
                 continue
@@ -374,6 +404,8 @@ def run(prompt: str, max_posts: int, run_id=None, should_stop=None):
 
     if user_stopped:
         status = "stopped"
+    elif timed_out:
+        status = "partial"
     elif len(collected) >= max_posts:
         status = "completed"
     else:
