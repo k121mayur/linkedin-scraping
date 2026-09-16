@@ -230,7 +230,23 @@ def stream(run_id: int):
     def generate():
         q = _progress_queues.get(run_id)
         if q is None:
-            yield f"data: {json.dumps({'error': 'run not found or already finished'})}\n\n"
+            # Check if the run has already finished in the database
+            run = db.get_run(run_id)
+            if run:
+                status = run.get("status")
+                jobs_found = run.get("jobs_found", 0)
+                max_jobs = run.get("max_jobs", 0)
+                if status == "completed":
+                    yield f"data: {json.dumps({'status': 'done', 'collected': jobs_found, 'target': max_jobs})}\n\n"
+                    return
+                elif status == "stopped":
+                    yield f"data: {json.dumps({'status': 'stopped', 'collected': jobs_found, 'target': max_jobs})}\n\n"
+                    return
+                elif status == "failed":
+                    err_msg = run.get("error_message") or "Run failed"
+                    yield f"data: {json.dumps({'error': err_msg})}\n\n"
+                    return
+            yield f"data: {json.dumps({'error': 'run not found'})}\n\n"
             return
         while True:
             try:
