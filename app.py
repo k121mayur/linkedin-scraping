@@ -255,7 +255,10 @@ def stream(run_id: int):
                 yield f"data: {json.dumps({'error': 'timeout waiting for progress'})}\n\n"
                 return
             if item is None:
-                yield f"data: {json.dumps({'status': 'done'})}\n\n"
+                run = db.get_run(run_id)
+                collected = run.get("jobs_found", 0) if run else 0
+                target = run.get("max_jobs", 0) if run else 0
+                yield f"data: {json.dumps({'status': 'done', 'collected': collected, 'target': target})}\n\n"
                 return
             if isinstance(item, dict) and "error" in item:
                 yield f"data: {json.dumps(item)}\n\n"
