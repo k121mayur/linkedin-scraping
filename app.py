@@ -148,7 +148,11 @@ def admin_delete_user(user_id: int):
     return jsonify({"error": "user not found"}), 404
 
 
-# ── scraping ─────────────────────────────────────────────────
+def _cleanup_queue(run_id: int):
+    import time
+    time.sleep(60)
+    _progress_queues.pop(run_id, None)
+
 
 def _scrape_worker(run_id: int, prompt: str, max_items: int, mode: str, profile: str = ""):
     """Background thread that runs the selected pipeline and pushes progress."""
@@ -171,8 +175,9 @@ def _scrape_worker(run_id: int, prompt: str, max_items: int, mode: str, profile:
         q.put({"error": str(e)})
     finally:
         q.put(None)  # Sentinel for completion
-        _progress_queues.pop(run_id, None)
         _stop_events.pop(run_id, None)
+        # Delay cleanup of progress queue so late-connecting SSE clients can read final state
+        threading.Thread(target=_cleanup_queue, args=(run_id,), daemon=True).start()
 
 
 @app.route("/")
