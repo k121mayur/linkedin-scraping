@@ -17,7 +17,7 @@ from config import (
     LINKEDIN_EMAIL, LINKEDIN_PASSWORD, PLAYWRIGHT_HEADLESS,
     AUTH_FILE_PATH, DRY_RUN, LINKEDIN_JOB_VIEW_URL,
     JOBS_PER_PAGE, MAX_SEARCH_PAGES, SCROLL_PASSES, PAGE_NAV_TIMEOUT,
-    MAX_POST_SEARCH_PAGES,
+    MAX_POST_SEARCH_PAGES, GRANT_DATE_POSTED,
 )
 from engine.email_verifier import fetch_verification_code, gmail_configured
 
@@ -732,7 +732,8 @@ def _extract_company_url(page) -> str:
 
 # ── Posts (content) search — grants pipeline ────────────────
 
-def _search_posts_sync(keyword: str, limit: int | None = None) -> list[dict]:
+def _search_posts_sync(keyword: str, limit: int | None = None,
+                       date_posted: str | None = None) -> list[dict]:
     """Search LinkedIn *posts* (the content search with the Posts filter applied)
     and extract each post: URN, permalink, text, author, relative posted date and
     any attached image URLs. Recent posts first.
@@ -749,12 +750,15 @@ def _search_posts_sync(keyword: str, limit: int | None = None) -> list[dict]:
     if _page is None or not _is_logged_in(_page):
         return []
 
+    dp = date_posted if date_posted is not None else GRANT_DATE_POSTED
     results: list[dict] = []
     seen_urns: set[str] = set()
 
     for page_idx in range(1, MAX_POST_SEARCH_PAGES + 1):
         url = (f"{CONTENT_SEARCH_URL}?keywords={_url_quote(keyword)}"
                f"&sortBy=%22date_posted%22")
+        if dp and dp.lower() not in {"all", "any", "none", ""}:
+            url += f"&origin=FACETED_SEARCH&datePosted=%5B%22{dp}%22%5D"
         if page_idx > 1:
             url += f"&page={page_idx}"
         try:
@@ -913,8 +917,8 @@ def _extract_post_cards(page) -> list[dict]:
                     if (sub) {
                         posted = sub.innerText.trim().split('•')[0].trim();
                     } else {
-                        const timeMatch = (node.innerText || '').match(/\\b(\\d+[smhdwMy])\\s*•/);
-                        if (timeMatch) posted = timeMatch[1];
+                        const timeMatch = (node.innerText || '').match(/\\b(\\d+\\s*(?:mo|yr|[smhdwMy]))\\s*•/i);
+                        if (timeMatch) posted = timeMatch[1].replace(/\\s+/, '');
                     }
 
                     const images = [];
@@ -934,6 +938,9 @@ def _extract_post_cards(page) -> list[dict]:
                     let postUrl = '';
                     if (urn.startsWith('urn:li:activity:')) {
                         postUrl = `https://www.linkedin.com/feed/update/${urn}/`;
+                    } else if (componentKey) {
+                        const cleanKey = componentKey.replace('FeedType_FLAGSHIP_SEARCH', '').replace('update-card-focus', '');
+                        postUrl = `https://www.linkedin.com/feed/update/${cleanKey}/`;
                     } else if (authorUrl) {
                         postUrl = authorUrl;
                     } else {
@@ -1078,8 +1085,9 @@ def get_job_detail(job_url_or_id: str) -> dict:
     return _on_browser_thread(_get_job_detail_sync, job_url_or_id)
 
 
-def search_posts(keyword: str, limit: int | None = None) -> list[dict]:
-    return _on_browser_thread(_search_posts_sync, keyword, limit)
+def search_posts(keyword: str, limit: int | None = None,
+                 date_posted: str | None = None) -> list[dict]:
+    return _on_browser_thread(_search_posts_sync, keyword, limit, date_posted=date_posted)
 
 
 def fetch_image_b64(url: str) -> str:

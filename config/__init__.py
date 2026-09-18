@@ -66,6 +66,7 @@ GRANT_RELEVANCE_THRESHOLD = float(os.getenv("GRANT_RELEVANCE_THRESHOLD", "0.7"))
 GRANT_DEFAULT_GEOGRAPHY = os.getenv("GRANT_DEFAULT_GEOGRAPHY", "India")
 GRANT_REQUIRE_INDIA_ELIGIBILITY = os.getenv("GRANT_REQUIRE_INDIA_ELIGIBILITY", "true").lower() not in {"false", "0", "no"}
 GRANT_ALLOW_GLOBAL = os.getenv("GRANT_ALLOW_GLOBAL", "true").lower() not in {"false", "0", "no"}
+GRANT_DATE_POSTED = os.getenv("GRANT_DATE_POSTED", "past-month")  # past-24h, past-week, past-month, or all
 
 # --- Auth / role-based access ---
 # The admin account is hardcoded (overridable via env). Regular users live in
