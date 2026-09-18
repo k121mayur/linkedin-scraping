@@ -183,14 +183,18 @@ def _is_logged_in(page) -> bool:
         "header#global-nav",
         "input.search-global-typeahead__input",
         "img.global-nav__me-photo",
+        "[data-sdui-screen]",
+        "#workspace",
+        "div[role='listitem']",
+        "div.global-nav__me",
     ):
         try:
             if page.query_selector(sel):
                 return True
         except Exception:
             continue
-    # On a /feed or /jobs URL without the auth wall, assume authenticated.
-    return "/feed" in url or "/jobs" in url
+    # On a /feed, /jobs, or /search URL without the auth wall, assume authenticated.
+    return "/feed" in url or "/jobs" in url or "/search" in url
 
 
 def _login():
@@ -760,8 +764,11 @@ def _search_posts_sync(keyword: str, limit: int | None = None) -> list[dict]:
 
         _throttle(1.5, 2.5)
         try:
-            _page_safe().wait_for_selector('div[data-urn*="urn:li:activity"], '
-                                           'div[data-chameleon-result-urn]', timeout=10000)
+            _page_safe().wait_for_selector(
+                'div[role="listitem"], div[data-urn*="urn:li:activity"], '
+                'div[data-chameleon-result-urn], [data-sdui-screen]',
+                timeout=12000
+            )
         except Exception:
             break  # no posts on this page → keyword exhausted
 
@@ -803,8 +810,14 @@ def _expand_see_more(page):
             """() => {
                 document.querySelectorAll(
                     'button.feed-shared-inline-show-more-text__see-more-less-toggle, ' +
-                    'button.see-more, button[aria-label*="see more" i]'
-                ).forEach(b => { try { b.click(); } catch (e) {} });
+                    'button.see-more, button[aria-label*="see more" i], ' +
+                    'button[aria-label*="more" i]'
+                ).forEach(b => {
+                    const txt = (b.innerText || '').trim().toLowerCase();
+                    if (txt.includes('more') || (b.getAttribute('aria-label') || '').toLowerCase().includes('more')) {
+                        try { b.click(); } catch (e) {}
+                    }
+                });
             }"""
         )
         time.sleep(0.5)
@@ -813,44 +826,83 @@ def _expand_see_more(page):
 
 
 def _extract_post_cards(page) -> list[dict]:
-    """Extract post data from the content-search DOM, keyed on activity URNs."""
+    """Extract post data from the content-search DOM, keyed on activity URNs or SDUI keys."""
     try:
         raw = page.evaluate(
             """() => {
                 const out = [];
-                const seen = {};
-                const nodes = document.querySelectorAll(
-                    'div[data-urn*="urn:li:activity"], div[data-chameleon-result-urn*="urn:li:activity"]'
-                );
+                const seen = new Set();
+
+                // Support both modern SDUI layout (div[role="listitem"]) and legacy layout
+                let nodes = Array.from(document.querySelectorAll('div[role="listitem"]')).filter(n => {
+                    const ck = n.getAttribute('componentkey') || '';
+                    return ck.includes('update-card') || n.querySelector('button[aria-label*="control menu" i]') || n.querySelector('a[href*="/in/"], a[href*="/company/"]');
+                });
+
+                if (!nodes.length) {
+                    nodes = Array.from(document.querySelectorAll(
+                        'div[data-urn*="urn:li:activity"], div[data-chameleon-result-urn*="urn:li:activity"]'
+                    ));
+                }
+
                 nodes.forEach(node => {
-                    const urn = node.getAttribute('data-urn') ||
-                                node.getAttribute('data-chameleon-result-urn') || '';
-                    const m = urn.match(/urn:li:activity:(\\d+)/);
-                    if (!m || seen[m[1]]) return;
-                    seen[m[1]] = true;
+                    const dataUrn = node.getAttribute('data-urn') || node.getAttribute('data-chameleon-result-urn') || '';
+                    const componentKey = node.getAttribute('componentkey') || '';
+
+                    let urn = '';
+                    const m = dataUrn.match(/urn:li:activity:(\\d+)/);
+                    if (m) {
+                        urn = 'urn:li:activity:' + m[1];
+                    } else if (componentKey) {
+                        const cleanKey = componentKey.replace('FeedType_FLAGSHIP_SEARCH', '').replace('update-card-focus', '');
+                        urn = cleanKey.startsWith('urn:') ? cleanKey : ('urn:li:sdui:' + cleanKey);
+                    } else {
+                        const anyAttr = Array.from(node.querySelectorAll('*')).find(el => {
+                            return Array.from(el.attributes).some(a => a.value.includes('urn:li:activity:'));
+                        });
+                        if (anyAttr) {
+                            const match = anyAttr.outerHTML.match(/urn:li:activity:(\\d+)/);
+                            if (match) urn = 'urn:li:activity:' + match[1];
+                        }
+                    }
+
+                    if (!urn || seen.has(urn)) return;
+                    seen.add(urn);
+
+                    let author = '', authorUrl = '';
+                    const authorLinks = Array.from(node.querySelectorAll('a[href*="/in/"], a[href*="/company/"]'));
+                    const namedLink = authorLinks.find(a => (a.innerText || '').trim().length > 0) || authorLinks[0];
+                    if (namedLink) {
+                        try {
+                            const u = new URL(namedLink.getAttribute('href'), 'https://www.linkedin.com');
+                            authorUrl = 'https://www.linkedin.com' + u.pathname;
+                        } catch (e) {
+                            authorUrl = namedLink.href.split('?')[0];
+                        }
+                        const rawName = namedLink.innerText.trim();
+                        author = rawName.split('\\n')[0].replace(/\\s*\\u2022\\s*.*$/, '').trim();
+                    }
 
                     let text = '';
-                    const textEl = node.querySelector(
+                    const legacyTextEl = node.querySelector(
                         '.update-components-text, .feed-shared-inline-show-more-text, ' +
                         '.feed-shared-update-v2__description, .update-components-update-v2__commentary'
                     );
-                    if (textEl) text = textEl.innerText.trim();
-
-                    let author = '', authorUrl = '';
-                    const actorName = node.querySelector(
-                        '.update-components-actor__title span[aria-hidden="true"], ' +
-                        '.update-components-actor__title, .update-components-actor__name'
-                    );
-                    if (actorName) author = actorName.innerText.trim().split('\\n')[0];
-                    const actorLink = node.querySelector(
-                        'a.update-components-actor__meta-link, a.update-components-actor__image, ' +
-                        '.update-components-actor a[href*="linkedin.com"], .update-components-actor a'
-                    );
-                    if (actorLink) {
-                        try {
-                            const u = new URL(actorLink.getAttribute('href'), 'https://www.linkedin.com');
-                            authorUrl = 'https://www.linkedin.com' + u.pathname;
-                        } catch (e) {}
+                    if (legacyTextEl) {
+                        text = legacyTextEl.innerText.trim();
+                    } else {
+                        const rawLines = (node.innerText || '').split('\\n').map(l => l.trim()).filter(Boolean);
+                        const bodyLines = [];
+                        for (const line of rawLines) {
+                            if (line === 'Feed post' || line.includes('• 3rd+') || line.includes('• 2nd') || line.includes('• 1st') || line === 'Follow') {
+                                continue;
+                            }
+                            if (/^(Like|Comment|Repost|Send|Share|\\d+\\s*(reactions?|comments?))$/i.test(line)) {
+                                continue;
+                            }
+                            bodyLines.push(line);
+                        }
+                        text = bodyLines.join('\\n');
                     }
 
                     let posted = '';
@@ -858,23 +910,39 @@ def _extract_post_cards(page) -> list[dict]:
                         '.update-components-actor__sub-description span[aria-hidden="true"], ' +
                         '.update-components-actor__sub-description'
                     );
-                    if (sub) posted = sub.innerText.trim().split('•')[0].trim();
+                    if (sub) {
+                        posted = sub.innerText.trim().split('•')[0].trim();
+                    } else {
+                        const timeMatch = (node.innerText || '').match(/\\b(\\d+[smhdwMy])\\s*•/);
+                        if (timeMatch) posted = timeMatch[1];
+                    }
 
                     const images = [];
                     node.querySelectorAll(
                         '.update-components-image img, .feed-shared-image img, ' +
-                        '.update-components-image__container img, .ivm-view-attr__img-wrapper img'
+                        '.update-components-image__container img, .ivm-view-attr__img-wrapper img, img'
                     ).forEach(img => {
                         const src = img.getAttribute('src') || '';
-                        if (src.startsWith('http') && !src.includes('profile-displayphoto') &&
-                            !images.includes(src)) {
-                            images.push(src);
+                        if (src.startsWith('http') && !src.includes('profile') && !src.includes('company-logo_100_100') &&
+                            !src.includes('shrink_100_100') && !src.includes('shrink_40_40') && !images.includes(src)) {
+                            if (src.includes('feedshare') || src.includes('article') || src.includes('dms/image')) {
+                                images.push(src);
+                            }
                         }
                     });
 
+                    let postUrl = '';
+                    if (urn.startsWith('urn:li:activity:')) {
+                        postUrl = `https://www.linkedin.com/feed/update/${urn}/`;
+                    } else if (authorUrl) {
+                        postUrl = authorUrl;
+                    } else {
+                        postUrl = 'https://www.linkedin.com/feed/';
+                    }
+
                     out.push({
-                        activity_id: m[1],
-                        urn: 'urn:li:activity:' + m[1],
+                        urn: urn,
+                        post_url: postUrl,
                         text: text,
                         author: author,
                         author_url: authorUrl,
@@ -893,9 +961,10 @@ def _extract_post_cards(page) -> list[dict]:
         urn = str(item.get("urn", "")).strip()
         if not urn:
             continue
+        post_url = item.get("post_url") or f"{LINKEDIN_URL}/feed/update/{urn}/"
         posts.append({
             "post_urn": urn,
-            "post_url": f"{LINKEDIN_URL}/feed/update/{urn}/",
+            "post_url": post_url,
             "text": (item.get("text") or "").strip()[:12000],
             "author": (item.get("author") or "").strip(),
             "author_url": (item.get("author_url") or "").strip(),
