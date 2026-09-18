@@ -154,7 +154,8 @@ def _cleanup_queue(run_id: int):
     _progress_queues.pop(run_id, None)
 
 
-def _scrape_worker(run_id: int, prompt: str, max_items: int, mode: str, profile: str = ""):
+def _scrape_worker(run_id: int, prompt: str, max_items: int, mode: str, profile: str = "",
+                   date_posted: str | None = None):
     """Background thread that runs the selected pipeline and pushes progress."""
     q = queue.Queue()
     _progress_queues[run_id] = q
@@ -164,7 +165,8 @@ def _scrape_worker(run_id: int, prompt: str, max_items: int, mode: str, profile:
         if mode == "grants":
             pipeline = run_grants_pipeline(prompt, max_items, run_id,
                                            should_stop=stop_event.is_set,
-                                           profile=profile)
+                                           profile=profile,
+                                           date_posted=date_posted)
         else:
             parsed = parse(prompt, max_items)
             pipeline = run_jobs_pipeline(prompt, parsed, max_items, run_id,
@@ -197,13 +199,14 @@ def scrape():
     mode = data.get("mode", "jobs")
     # Organisation profile — optional, grants mode only. Plain text / markdown.
     profile = (data.get("profile") or "").strip()
+    date_posted = (data.get("date_posted") or "").strip() or None
     if mode not in ("jobs", "grants"):
         return jsonify({"error": f"unknown mode: {mode}"}), 400
     if not prompt:
         return jsonify({"error": "prompt is required"}), 400
 
     run_id = db.create_run(prompt, max_items, run_type=mode)
-    threading.Thread(target=_scrape_worker, args=(run_id, prompt, max_items, mode, profile),
+    threading.Thread(target=_scrape_worker, args=(run_id, prompt, max_items, mode, profile, date_posted),
                      daemon=True).start()
     return jsonify({"run_id": run_id, "status": "started", "mode": mode})
 

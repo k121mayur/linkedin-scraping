@@ -420,8 +420,33 @@
       gap: 1rem;
       align-items: end;
     }
+    .controls--grants {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: end;
+      justify-content: space-between;
+      gap: 1rem;
+    }
     .count-field { display: grid; gap: 0.55rem; }
     .count-row { display: flex; align-items: center; gap: 0.5rem; }
+    .date-filter-field { display: grid; gap: 0.55rem; }
+    .select-input {
+      font-family: var(--font-display);
+      font-size: 0.88rem;
+      color: var(--text);
+      background: var(--peach);
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      padding: 0.72rem 0.85rem;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 150ms, background 150ms;
+    }
+    .select-input:focus-visible {
+      border-color: var(--accent);
+      box-shadow: var(--ring);
+      background: var(--white);
+    }
     input[type="number"] {
       width: 84px;
       padding: 0.72rem 0.6rem 0.72rem 0.85rem;
@@ -1003,7 +1028,7 @@
                 </div>
               </div>
 
-              <div class="controls">
+              <div class="controls controls--grants">
                 <div class="count-field">
                   <span class="field__label">Target post count</span>
                   <div class="count-row">
@@ -1012,6 +1037,15 @@
                     <button type="button" class="preset" data-preset-for="g-max" data-preset="25">25</button>
                     <button type="button" class="preset" data-preset-for="g-max" data-preset="50">50</button>
                   </div>
+                </div>
+                <div class="date-filter-field">
+                  <span class="field__label">Date posted filter</span>
+                  <select id="g-date-posted" name="date_posted" class="select-input" aria-label="Filter posts by date posted">
+                    <option value="past-month" selected>Past month (recommended)</option>
+                    <option value="past-week">Past week</option>
+                    <option value="past-24h">Past 24 hours</option>
+                    <option value="all">Any time</option>
+                  </select>
                 </div>
                 <button type="submit" id="g-submit-btn" class="submit">
                   <span id="g-submit-label">Start extraction</span>
@@ -1240,6 +1274,7 @@ function wirePanel(cfg) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt, max_jobs: maxItems, mode: cfg.mode,
+                               ...(cfg.getDatePosted ? { date_posted: cfg.getDatePosted() } : {}),
                                ...(cfg.getProfile ? { profile: cfg.getProfile() } : {}) }),
       });
       if (res.status === 401) { location.href = '/login'; return; }
@@ -1368,6 +1403,10 @@ wirePanel({
   emptyPromptMsg: 'Describe the funding opportunities you want to find.',
   planningMsg: 'Planning LinkedIn post searches for funding opportunities.',
   scanningMsg: 'Reading posts, images and linked sites for funding details…',
+  getDatePosted: () => {
+    const el = $('g-date-posted');
+    return el ? el.value : 'past-month';
+  },
   ids: {
     panelRoot: 'panel-grants',
     form: 'g-scrape-form', error: 'g-error', errorText: 'g-error-text',
