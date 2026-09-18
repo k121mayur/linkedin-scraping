@@ -64,15 +64,16 @@ post-search phrases that funders and intermediaries actually use.
 
 User request: "{prompt}"
 
-CRITICAL GEOGRAPHY INSTRUCTION:
-Unless the user explicitly specifies a different country, all searches MUST be
-anchored to India and Indian funding ecosystems. Include phrases combining the
-cause with Indian funding terms (e.g. 'grant opportunity India', 'CSR funding NGO India',
-'call for proposals India nonprofit', 'NGO grants India').
+CRITICAL SEARCH PHRASE INSTRUCTIONS:
+1. Short & Natural: Generate concise 2 to 4 word search phrases (e.g. 'education grants India', 'CSR funding India', 'call for proposals India', 'NGO funding India').
+2. NO Quotation Marks: NEVER wrap terms in quotes (do NOT use "..." or '...').
+3. NO Boolean Operators: Do NOT use AND, OR, NOT, or plus signs.
+4. NO Specific Years: Do NOT append past years (e.g. 2023, 2024).
+5. GEOGRAPHY (INDIA FOCUS): Unless the user explicitly specifies a different country, all searches MUST be anchored to India and Indian funding ecosystems.
 
 Return ONLY a JSON object:
 {{
-    "keywords": ["3-5 broad search phrases anchored to India/requested cause, most specific first"],
+    "keywords": ["3-5 concise 2-4 word search phrases anchored to India/cause, most specific first"],
     "focus": "one-line summary of what the user wants funded"
 }}
 """

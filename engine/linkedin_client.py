@@ -755,10 +755,12 @@ def _search_posts_sync(keyword: str, limit: int | None = None,
     seen_urns: set[str] = set()
 
     for page_idx in range(1, MAX_POST_SEARCH_PAGES + 1):
-        url = (f"{CONTENT_SEARCH_URL}?keywords={_url_quote(keyword)}"
-               f"&sortBy=%22date_posted%22")
         if dp and dp.lower() not in {"all", "any", "none", ""}:
-            url += f"&origin=FACETED_SEARCH&datePosted=%5B%22{dp}%22%5D"
+            url = (f"{CONTENT_SEARCH_URL}?keywords={_url_quote(keyword)}"
+                   f"&origin=FACETED_SEARCH&datePosted=%5B%22{dp}%22%5D")
+        else:
+            url = (f"{CONTENT_SEARCH_URL}?keywords={_url_quote(keyword)}"
+                   f"&sortBy=%22date_posted%22")
         if page_idx > 1:
             url += f"&page={page_idx}"
         try:

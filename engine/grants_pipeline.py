@@ -61,19 +61,46 @@ _DEFAULT_KEYWORDS = [
 ]
 
 
+def clean_keyword(kw: str) -> str:
+    """Clean and sanitize search phrases for LinkedIn content search.
+    Removes quotes, boolean operators, outdated years, and limits excessive word count.
+    """
+    # Remove quotation marks, brackets, and colons
+    cleaned = re.sub(r'["\'\[\]():]+', ' ', kw)
+    # Remove standalone years like 2020-2025
+    cleaned = re.sub(r'\b202[0-5]\b', '', cleaned)
+    # Remove boolean operators
+    cleaned = re.sub(r'\b(AND|OR|NOT)\b', ' ', cleaned)
+    # Normalize whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    # Keep at most 4-5 words to avoid over-constraining LinkedIn search
+    words = cleaned.split()
+    if len(words) > 5:
+        cleaned = " ".join(words[:5])
+    return cleaned
+
+
 def plan_keywords(prompt: str) -> list[str]:
     """Turn the user's request into LinkedIn post-search phrases (LLM, with a
     dependable default list as fallback)."""
     if not DRY_RUN:
         try:
             result = chat_json(GRANT_KEYWORDS_TEMPLATE.format(prompt=prompt))
-            kws = [str(k).strip() for k in result.get("keywords", []) if str(k).strip()]
-            if kws:
-                return kws[:5]
+            raw_kws = [str(k).strip() for k in result.get("keywords", []) if str(k).strip()]
+            cleaned_kws = [clean_keyword(k) for k in raw_kws if clean_keyword(k)]
+            # Deduplicate preserving order
+            seen = set()
+            dedup_kws = []
+            for k in cleaned_kws:
+                if k.lower() not in seen:
+                    seen.add(k.lower())
+                    dedup_kws.append(k)
+            if dedup_kws:
+                return dedup_kws[:5]
         except Exception as e:
             _log(f"keyword planning fell back to defaults: {e}")
     # Heuristic: defaults, seeded with the user's own words.
-    extra = prompt.strip()
+    extra = clean_keyword(prompt.strip())
     if extra and "india" not in extra.lower() and GRANT_REQUIRE_INDIA_ELIGIBILITY:
         extra = f"{extra} India"
     kws = list(_DEFAULT_KEYWORDS)
@@ -491,6 +518,19 @@ def run(prompt: str, max_posts: int, run_id=None, should_stop=None, profile: str
             db.log_attempt(run_id, keyword, "", action="grant_posts", error=str(e))
             _log(f"  ! post search failed: {e}")
             continue
+
+        # If a narrow query returned 0 posts (common with past-24h), retry with a broader 2-3 word query
+        if len(posts) == 0 and len(keyword.split()) > 3:
+            simplified = " ".join(keyword.split()[:3])
+            if "india" not in simplified.lower() and GRANT_REQUIRE_INDIA_ELIGIBILITY:
+                simplified += " India"
+            _log(f"  ! 0 posts for {keyword!r}; retrying with broader query: {simplified!r}")
+            try:
+                broader_posts = search_posts(simplified, limit=max(need * 2, 10), date_posted=active_date_posted)
+                if broader_posts:
+                    posts = broader_posts
+            except Exception:
+                pass
 
         _log(f"  found {len(posts)} post(s)")
 
