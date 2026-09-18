@@ -59,14 +59,20 @@ Return ONLY a JSON list, one object per job, no markdown:
 
 GRANT_KEYWORDS_TEMPLATE = """
 You are a fundraising expert for NGOs. A user wants to find funding/grant
-opportunities posted on LinkedIn. Expand their request into concrete LinkedIn
+opportunities posted on LinkedIn. Expand their request into 3-5 concrete LinkedIn
 post-search phrases that funders and intermediaries actually use.
 
 User request: "{prompt}"
 
+CRITICAL GEOGRAPHY INSTRUCTION:
+Unless the user explicitly specifies a different country, all searches MUST be
+anchored to India and Indian funding ecosystems. Include phrases combining the
+cause with Indian funding terms (e.g. 'grant opportunity India', 'CSR funding NGO India',
+'call for proposals India nonprofit', 'NGO grants India').
+
 Return ONLY a JSON object:
 {{
-    "keywords": ["5-8 short search phrases, most specific first, e.g. 'grant opportunity NGO', 'call for proposals nonprofit India', 'funding opportunity CSR'"],
+    "keywords": ["3-5 broad search phrases anchored to India/requested cause, most specific first"],
     "focus": "one-line summary of what the user wants funded"
 }}
 """
@@ -98,6 +104,15 @@ request from 0.0 to 1.0. Be accurate: only report facts present in the
 content; use "" for anything not stated. Do not invent deadlines or amounts.
 
 MANDATORY SCORING RULES — apply these BEFORE assigning any score:
+- GEOGRAPHIC ELIGIBILITY (INDIA FOCUS): Score EXACTLY 0.0 and set
+  is_funding_opportunity=false if the opportunity is geographically restricted
+  to regions outside India (e.g. exclusively for US 501(c)(3), UK-only, Europe-only,
+  Sub-Saharan Africa, Latin America) where Indian organizations or projects in India
+  are not eligible.
+  Opportunities explicitly open to India, South Asia, or global/worldwide calls
+  open to Indian applicants should be evaluated normally.
+  Always report the exact territory in the 'geography' field (e.g. 'India',
+  'India (Pan-India)', 'Global (including India)', or 'USA only').
 - Score EXACTLY 0.0 and set is_funding_opportunity=false if the post is from an
   entity SEEKING funding (e.g. an NGO asking donors for money, a crowdfunding
   appeal, a donation request). Only posts from an OFFERING entity count.

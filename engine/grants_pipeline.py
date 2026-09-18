@@ -19,6 +19,8 @@ from config import (
     GRANT_ANALYZE_IMAGES, GRANT_FOLLOW_LINKS,
     GRANT_MAX_LINKS_PER_POST, GRANT_MAX_IMAGES_PER_POST,
     GRANT_RELEVANCE_THRESHOLD,
+    GRANT_DEFAULT_GEOGRAPHY, GRANT_REQUIRE_INDIA_ELIGIBILITY,
+    GRANT_ALLOW_GLOBAL,
 )
 from config.ai_config import (
     GRANT_KEYWORDS_TEMPLATE, GRANT_ANALYSIS_TEMPLATE, GRANT_IMAGE_OCR_PROMPT,
@@ -49,12 +51,12 @@ _GRANTS_MAX_RUN_SECONDS = 480
 
 
 _DEFAULT_KEYWORDS = [
-    "grant opportunity NGO",
-    "funding opportunity nonprofit",
-    "call for proposals NGO",
     "grants for NGOs India",
-    "CSR funding NGO",
-    "seed funding nonprofit",
+    "CSR funding India NGO",
+    "call for proposals India NGO",
+    "grant opportunity India nonprofit",
+    "funding opportunity India NGO",
+    "seed funding nonprofit India",
 ]
 
 
@@ -66,15 +68,17 @@ def plan_keywords(prompt: str) -> list[str]:
             result = chat_json(GRANT_KEYWORDS_TEMPLATE.format(prompt=prompt))
             kws = [str(k).strip() for k in result.get("keywords", []) if str(k).strip()]
             if kws:
-                return kws[:8]
+                return kws[:5]
         except Exception as e:
             _log(f"keyword planning fell back to defaults: {e}")
     # Heuristic: defaults, seeded with the user's own words.
     extra = prompt.strip()
+    if extra and "india" not in extra.lower() and GRANT_REQUIRE_INDIA_ELIGIBILITY:
+        extra = f"{extra} India"
     kws = list(_DEFAULT_KEYWORDS)
     if extra and extra.lower() not in [k.lower() for k in kws]:
         kws.insert(0, extra[:80])
-    return kws
+    return kws[:5]
 
 
 # ── helpers ──────────────────────────────────────────────────
@@ -187,20 +191,100 @@ _DEADLINE_RE = re.compile(
     r"(?:deadline|apply by|last date|closes? on|due(?: date)?|before)[:\s]*"
     r"([A-Za-z0-9 ,/-]{4,40}?)(?:\.|\n|$)", re.IGNORECASE)
 
+_EXCLUSION_PATTERNS = [
+    re.compile(r"\b501\(c\)\(3\)\s*(?:only|status\s+required|required|organizations?\s+only)\b", re.IGNORECASE),
+    re.compile(r"\b(?:us|usa|united states)\s+(?:only|citizens?\s+only|applicants?\s+only|entities\s+only|nonprofits?\s+only)\b", re.IGNORECASE),
+    re.compile(r"\b(?:uk|united kingdom)\s+(?:only|registered\s+charit(?:y|ies)\s+only)\b", re.IGNORECASE),
+    re.compile(r"\b(?:sub-saharan\s+africa|african\s+countries|latin\s+america)\s+only\b", re.IGNORECASE),
+    re.compile(r"\bfor\s+(?:us|uk|canadian|australian)\s+(?:nonprofits?|charities|ngos)\s+only\b", re.IGNORECASE),
+]
+
+_INDIA_SIGNALS = {
+    "india", "indian", "csr", "fcra", "80g", "12a", "12ab", "delhi", "mumbai", "bangalore",
+    "bengaluru", "hyderabad", "chennai", "pune", "kolkata", "ahmedabad", "noida",
+    "gurgaon", "gurugram", "maharashtra", "karnataka", "tamil nadu", "uttar pradesh",
+    "bihar", "rajasthan", "gujarat", "kerala", "telangana", "andhra", "madhya pradesh",
+    "west bengal", "odisha", "assam", "jharkhand", "niti aayog", "darpan", "section 8",
+}
+
+_GLOBAL_SIGNALS = {
+    "global", "worldwide", "international", "any country", "open globally",
+    "all countries", "developing countries", "global south", "south asia",
+}
+
+
+def is_ineligible_geography(text: str) -> bool:
+    """Fast pre-filter: returns True if the text is explicitly restricted to a non-Indian region."""
+    if not GRANT_REQUIRE_INDIA_ELIGIBILITY:
+        return False
+    low = (text or "").lower()
+    # If India is explicitly mentioned, do not reject at the pre-filter stage
+    if "india" in low or "indian" in low:
+        return False
+    for pat in _EXCLUSION_PATTERNS:
+        if pat.search(low):
+            return True
+    return False
+
+
+def is_geography_relevant(analysis: dict, post_text: str = "") -> bool:
+    """Validate whether the post and its analysis represent an India-eligible opportunity."""
+    if not GRANT_REQUIRE_INDIA_ELIGIBILITY:
+        return True
+
+    geo = (analysis.get("geography") or "").lower()
+    combined = f"{geo} {(analysis.get('eligibility') or '')} {(analysis.get('summary') or '')} {post_text}".lower()
+
+    # Direct India signals
+    if any(sig in combined for sig in _INDIA_SIGNALS):
+        return True
+
+    # If global / international is permitted
+    if GRANT_ALLOW_GLOBAL and any(sig in geo or sig in combined for sig in _GLOBAL_SIGNALS):
+        if not any(pat.search(combined) for pat in _EXCLUSION_PATTERNS):
+            return True
+
+    # If LLM extracted India explicitly in geography
+    if "india" in geo or "south asia" in geo:
+        return True
+
+    return False
+
 
 def _heuristic_analysis(full_text: str, prompt: str, profile: str = "") -> dict:
     """Keyword-based fallback when the LLM is unavailable (or in DRY_RUN)."""
     low = (full_text or "").lower()
     hits = sum(1 for t in _FUNDING_TERMS if t in low)
-    score = min(1.0, 0.15 + 0.12 * hits) if hits else 0.0
+    india_hits = sum(1 for t in _INDIA_SIGNALS if t in low)
+
+    if is_ineligible_geography(full_text):
+        return {
+            "is_funding_opportunity": False,
+            "relevance_score": 0.0,
+            "relevance_reason": "ineligible geography (restricted to non-India region)",
+            "opportunity_title": "",
+            "funder": "",
+            "summary": (full_text or "")[:400],
+            "deadline": "",
+            "grant_amount": "",
+            "eligibility": "",
+            "focus_areas": "",
+            "geography": "Excluded (non-India)",
+            "how_to_apply": "",
+            "application_link": "",
+            "contact_email": "",
+        }
+
+    score = min(1.0, 0.15 + 0.12 * hits + (0.15 if india_hits else 0.0)) if hits else 0.0
     email = _EMAIL_RE.search(full_text or "")
     deadline = _DEADLINE_RE.search(full_text or "")
     urls = extract_urls(full_text)
     first_line = next((ln.strip() for ln in (full_text or "").split("\n") if ln.strip()), "")
+    geo = "India" if india_hits else ("Global" if any(g in low for g in _GLOBAL_SIGNALS) else "")
     return {
         "is_funding_opportunity": hits >= 2,
         "relevance_score": round(score, 2),
-        "relevance_reason": f"keyword fallback ({hits} funding term(s) matched)",
+        "relevance_reason": f"keyword fallback ({hits} funding term(s), {india_hits} India signal(s) matched)",
         "opportunity_title": first_line[:140],
         "funder": "",
         "summary": (full_text or "")[:400],
@@ -208,7 +292,7 @@ def _heuristic_analysis(full_text: str, prompt: str, profile: str = "") -> dict:
         "grant_amount": "",
         "eligibility": "",
         "focus_areas": "",
-        "geography": "",
+        "geography": geo,
         "how_to_apply": "",
         "application_link": urls[0] if urls else "",
         "contact_email": email.group(0) if email else "",
@@ -347,6 +431,11 @@ def run(prompt: str, max_posts: int, run_id=None, should_stop=None, profile: str
                 continue
             examined.add(urn)
 
+            # Fast geographic pre-filter (skip non-India posts before vision/site enrichment)
+            if is_ineligible_geography(post.get("text", "")):
+                _log(f"    - skipping post {urn[:25]}... (ineligible non-India geography)")
+                continue
+
             image_text = read_post_images(post.get("image_urls", []))
             external_links, external_text = read_external_sites(post.get("text", ""))
 
@@ -354,6 +443,11 @@ def run(prompt: str, max_posts: int, run_id=None, should_stop=None, profile: str
                                      profile=profile)
             score = float(analysis.get("relevance_score") or 0.0)
             if not analysis.get("is_funding_opportunity") or score < GRANT_RELEVANCE_THRESHOLD:
+                continue
+
+            # Post-analysis geographic verification
+            if not is_geography_relevant(analysis, post.get("text", "")):
+                _log(f"    - skipping post {urn[:25]}... (geography '{analysis.get('geography')}' not eligible for India)")
                 continue
 
             grant = {

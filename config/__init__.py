@@ -63,6 +63,9 @@ GRANT_FOLLOW_LINKS = os.getenv("GRANT_FOLLOW_LINKS", "true").lower() not in {"fa
 GRANT_MAX_LINKS_PER_POST = int(os.getenv("GRANT_MAX_LINKS_PER_POST", "2"))  # external sites fetched per post
 GRANT_MAX_IMAGES_PER_POST = int(os.getenv("GRANT_MAX_IMAGES_PER_POST", "2"))
 GRANT_RELEVANCE_THRESHOLD = float(os.getenv("GRANT_RELEVANCE_THRESHOLD", "0.7"))
+GRANT_DEFAULT_GEOGRAPHY = os.getenv("GRANT_DEFAULT_GEOGRAPHY", "India")
+GRANT_REQUIRE_INDIA_ELIGIBILITY = os.getenv("GRANT_REQUIRE_INDIA_ELIGIBILITY", "true").lower() not in {"false", "0", "no"}
+GRANT_ALLOW_GLOBAL = os.getenv("GRANT_ALLOW_GLOBAL", "true").lower() not in {"false", "0", "no"}
 
 # --- Auth / role-based access ---
 # The admin account is hardcoded (overridable via env). Regular users live in
