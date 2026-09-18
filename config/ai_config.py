@@ -83,6 +83,7 @@ from one LinkedIn post (post text, plus any text read from attached images and
 any content fetched from external websites linked in the post).
 
 User's request: "{prompt}"
+Today's date: {current_date}
 
 ORGANISATION PROFILE (may be empty — use this ONLY to judge fit/relevance;
 never invent facts from it):
@@ -104,6 +105,10 @@ request from 0.0 to 1.0. Be accurate: only report facts present in the
 content; use "" for anything not stated. Do not invent deadlines or amounts.
 
 MANDATORY SCORING RULES — apply these BEFORE assigning any score:
+- DEADLINE & EXPIRATION CHECK: Today's date is {current_date}. If the post states
+  an application deadline that has ALREADY PASSED relative to today's date, you MUST
+  score EXACTLY 0.0 and set is_funding_opportunity=false. We ONLY want open, active,
+  rolling, or upcoming opportunities where organizations can still apply today.
 - GEOGRAPHIC ELIGIBILITY (INDIA FOCUS): Score EXACTLY 0.0 and set
   is_funding_opportunity=false if the opportunity is geographically restricted
   to regions outside India (e.g. exclusively for US 501(c)(3), UK-only, Europe-only,

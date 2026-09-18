@@ -20,11 +20,12 @@ from config import (
     GRANT_MAX_LINKS_PER_POST, GRANT_MAX_IMAGES_PER_POST,
     GRANT_RELEVANCE_THRESHOLD,
     GRANT_DEFAULT_GEOGRAPHY, GRANT_REQUIRE_INDIA_ELIGIBILITY,
-    GRANT_ALLOW_GLOBAL,
+    GRANT_ALLOW_GLOBAL, GRANT_DATE_POSTED,
 )
 from config.ai_config import (
     GRANT_KEYWORDS_TEMPLATE, GRANT_ANALYSIS_TEMPLATE, GRANT_IMAGE_OCR_PROMPT,
 )
+from dateutil import parser as date_parser
 from engine import database as db
 from engine.linkedin_client import search_posts, fetch_image_b64
 from engine.llm_client import chat_json, chat_vision
@@ -155,9 +156,10 @@ class _TextExtractor(HTMLParser):
             self.chunks.append(data.strip())
 
 
-def fetch_site_text(url: str, max_chars: int = 6000) -> str:
-    """Fetch an external page and return its visible text (best effort)."""
+def fetch_site_text(url: str, max_chars: int = 6000) -> tuple[str, str]:
+    """Fetch an external page and return (resolved_url, visible_text) (best effort)."""
     import urllib.request
+    final_url = url
     try:
         req = urllib.request.Request(url, headers={
             "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -165,19 +167,20 @@ def fetch_site_text(url: str, max_chars: int = 6000) -> str:
             "Accept": "text/html,application/xhtml+xml",
         })
         with urllib.request.urlopen(req, timeout=20) as resp:
+            final_url = resp.geturl() or url
             ctype = resp.headers.get("Content-Type", "")
             if "html" not in ctype and "text" not in ctype:
-                return ""
+                return final_url, ""
             body = resp.read(1_500_000).decode("utf-8", errors="replace")
     except Exception:
-        return ""
+        return final_url, ""
     parser = _TextExtractor()
     try:
         parser.feed(body)
     except Exception:
         pass
     text = re.sub(r"\s+", " ", " ".join(parser.chunks))
-    return text[:max_chars]
+    return final_url, text[:max_chars]
 
 
 # ── analysis ─────────────────────────────────────────────────
@@ -251,6 +254,50 @@ def is_geography_relevant(analysis: dict, post_text: str = "") -> bool:
     return False
 
 
+_MONTH_NAMES = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec")
+_DATE_NUM_RE = re.compile(r"\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b")
+_ROLLING_TERMS = ("rolling", "ongoing", "open until", "open-ended", "always open", "continuous", "n/a", "none", "tbd")
+
+
+def is_deadline_expired(deadline_str: str) -> bool:
+    """Check if an extracted deadline date has already passed relative to today.
+    Returns True ONLY if a definitive date in the past was identified.
+    Returns False for open-ended / rolling deadlines or unparseable text.
+    """
+    if not deadline_str:
+        return False
+    clean = deadline_str.strip()
+    low = clean.lower()
+    if any(term in low for term in _ROLLING_TERMS):
+        return False
+
+    has_month = any(m in low for m in _MONTH_NAMES)
+    has_date_num = bool(_DATE_NUM_RE.search(clean))
+    if not (has_month or has_date_num):
+        return False
+
+    today = datetime.now(timezone.utc).date()
+    try:
+        dt = date_parser.parse(clean, fuzzy=True)
+        return dt.date() < today
+    except Exception:
+        return False
+
+
+def detect_date_filter(prompt: str, explicit: str | None = None) -> str:
+    """Determine the datePosted LinkedIn search facet from user parameter or prompt text."""
+    if explicit and explicit.strip():
+        return explicit.strip().lower()
+    low = (prompt or "").lower()
+    if any(k in low for k in ("24h", "24 hours", "24 hour", "today", "yesterday", "past day", "last 24")):
+        return "past-24h"
+    if any(k in low for k in ("past week", "last week", "this week", "past 7 days", "7 days")):
+        return "past-week"
+    if any(k in low for k in ("past month", "last month", "this month", "past 30 days", "30 days")):
+        return "past-month"
+    return GRANT_DATE_POSTED
+
+
 def _heuristic_analysis(full_text: str, prompt: str, profile: str = "") -> dict:
     """Keyword-based fallback when the LLM is unavailable (or in DRY_RUN)."""
     low = (full_text or "").lower()
@@ -275,9 +322,29 @@ def _heuristic_analysis(full_text: str, prompt: str, profile: str = "") -> dict:
             "contact_email": "",
         }
 
-    score = min(1.0, 0.15 + 0.12 * hits + (0.15 if india_hits else 0.0)) if hits else 0.0
     email = _EMAIL_RE.search(full_text or "")
     deadline = _DEADLINE_RE.search(full_text or "")
+    deadline_val = deadline.group(1).strip() if deadline else ""
+
+    if is_deadline_expired(deadline_val):
+        return {
+            "is_funding_opportunity": False,
+            "relevance_score": 0.0,
+            "relevance_reason": f"deadline expired ({deadline_val})",
+            "opportunity_title": "",
+            "funder": "",
+            "summary": (full_text or "")[:400],
+            "deadline": deadline_val,
+            "grant_amount": "",
+            "eligibility": "",
+            "focus_areas": "",
+            "geography": "",
+            "how_to_apply": "",
+            "application_link": "",
+            "contact_email": "",
+        }
+
+    score = min(1.0, 0.15 + 0.12 * hits + (0.15 if india_hits else 0.0)) if hits else 0.0
     urls = extract_urls(full_text)
     first_line = next((ln.strip() for ln in (full_text or "").split("\n") if ln.strip()), "")
     geo = "India" if india_hits else ("Global" if any(g in low for g in _GLOBAL_SIGNALS) else "")
@@ -288,7 +355,7 @@ def _heuristic_analysis(full_text: str, prompt: str, profile: str = "") -> dict:
         "opportunity_title": first_line[:140],
         "funder": "",
         "summary": (full_text or "")[:400],
-        "deadline": deadline.group(1).strip() if deadline else "",
+        "deadline": deadline_val,
         "grant_amount": "",
         "eligibility": "",
         "focus_areas": "",
@@ -311,8 +378,10 @@ def analyze_post(post_text: str, image_text: str, external_text: str, prompt: st
     if DRY_RUN:
         return _heuristic_analysis(combined, prompt, profile)
     try:
+        current_date = datetime.now(timezone.utc).strftime("%d %B %Y")
         result = chat_json(GRANT_ANALYSIS_TEMPLATE.format(
             prompt=prompt,
+            current_date=current_date,
             profile=(profile or "")[:4000],
             post_text=(post_text or "")[:6000],
             image_text=(image_text or "")[:3000],
@@ -353,16 +422,24 @@ def read_external_sites(post_text: str) -> tuple[str, str]:
     if DRY_RUN or not GRANT_FOLLOW_LINKS:
         return ", ".join(urls), ""
     texts = []
+    resolved_urls = []
     for url in urls[:GRANT_MAX_LINKS_PER_POST]:
-        t = fetch_site_text(url)
+        final_url, t = fetch_site_text(url)
+        resolved_urls.append(final_url or url)
         if t:
-            texts.append(f"[{url}]\n{t}")
-    return ", ".join(urls), "\n\n".join(texts)
+            texts.append(f"[{final_url or url}]\n{t}")
+    all_urls = resolved_urls + urls[len(resolved_urls):]
+    dedup = []
+    for u in all_urls:
+        if u and u not in dedup:
+            dedup.append(u)
+    return ", ".join(dedup), "\n\n".join(texts)
 
 
 # ── orchestrator ─────────────────────────────────────────────
 
-def run(prompt: str, max_posts: int, run_id=None, should_stop=None, profile: str = ""):
+def run(prompt: str, max_posts: int, run_id=None, should_stop=None, profile: str = "",
+        date_posted: str | None = None):
     """Execute the grants pipeline. Yields Progress, returns the collected list.
 
     ``profile`` is an optional organisation-profile document forwarded verbatim to
@@ -379,9 +456,10 @@ def run(prompt: str, max_posts: int, run_id=None, should_stop=None, profile: str
     examined: set[str] = set()
     attempts = 0
 
+    active_date_posted = detect_date_filter(prompt, date_posted)
     keywords = plan_keywords(prompt)
     _log(f"Run {run_id} started - target {max_posts} grant posts | "
-         f"keywords: {keywords}")
+         f"date filter: {active_date_posted} | keywords: {keywords}")
 
     user_stopped = False
 
@@ -400,7 +478,7 @@ def run(prompt: str, max_posts: int, run_id=None, should_stop=None, profile: str
             break
         attempts += 1
         db.log_attempt(run_id, keyword, "", action="grant_posts")
-        _log(f"Pass {attempts}: searching posts for {keyword!r} "
+        _log(f"Pass {attempts}: searching posts for {keyword!r} (filter: {active_date_posted}) "
              f"({len(collected)}/{max_posts})")
 
         yield Progress(run_id=run_id, collected=len(collected), target=max_posts,
@@ -408,7 +486,7 @@ def run(prompt: str, max_posts: int, run_id=None, should_stop=None, profile: str
 
         need = max_posts - len(collected)
         try:
-            posts = search_posts(keyword, limit=max(need * 2, 10))
+            posts = search_posts(keyword, limit=max(need * 2, 10), date_posted=active_date_posted)
         except Exception as e:
             db.log_attempt(run_id, keyword, "", action="grant_posts", error=str(e))
             _log(f"  ! post search failed: {e}")
@@ -445,10 +523,23 @@ def run(prompt: str, max_posts: int, run_id=None, should_stop=None, profile: str
             if not analysis.get("is_funding_opportunity") or score < GRANT_RELEVANCE_THRESHOLD:
                 continue
 
+            # Programmatic deadline expiration check
+            deadline = analysis.get("deadline", "").strip()
+            if is_deadline_expired(deadline):
+                _log(f"    - skipping post {urn[:25]}... (deadline '{deadline}' has expired)")
+                continue
+
             # Post-analysis geographic verification
             if not is_geography_relevant(analysis, post.get("text", "")):
                 _log(f"    - skipping post {urn[:25]}... (geography '{analysis.get('geography')}' not eligible for India)")
                 continue
+
+            # Resolve unshortened application link
+            app_link = (analysis.get("application_link", "") or "").strip()
+            if not app_link or "lnkd.in" in app_link:
+                first_resolved = external_links.split(", ")[0].strip() if external_links else ""
+                if first_resolved and "lnkd.in" not in first_resolved:
+                    app_link = first_resolved
 
             grant = {
                 "post_urn": urn,
@@ -467,8 +558,7 @@ def run(prompt: str, max_posts: int, run_id=None, should_stop=None, profile: str
                 "focus_areas": analysis.get("focus_areas", ""),
                 "geography": analysis.get("geography", ""),
                 "how_to_apply": analysis.get("how_to_apply", ""),
-                "application_link": (analysis.get("application_link", "")
-                                     or (external_links.split(", ")[0] if external_links else "")),
+                "application_link": app_link or (external_links.split(", ")[0] if external_links else ""),
                 "external_links": external_links,
                 "contact_email": analysis.get("contact_email", ""),
                 "post_text": post.get("text", ""),
